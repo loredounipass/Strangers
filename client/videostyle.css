@@ -31,6 +31,8 @@ body {
   height: 100%;
   background-color: #000;
   object-fit: cover;
+  position: relative;
+  z-index: 1;
 }
 
 #my-video {
@@ -38,13 +40,23 @@ body {
   position: absolute;
   top: 20px;
   right: 20px;
-  width: 200px;
-  height: 200px;
+  width: 150px;
+  height: 150px;
   border-radius: 50%;
   object-fit: cover;
   border: 3px solid #FFFF00;
   overflow: hidden;
   box-shadow: 0 0 15px rgba(255, 255, 0, 0.3);
+  z-index: 300;
+}
+
+@media only screen and (max-width: 600px) {
+  #my-video {
+    width: 80px;
+    height: 80px;
+    top: 10px;
+    right: 10px;
+  }
 }
 
 .controls {
@@ -54,7 +66,7 @@ body {
   transform: translateX(-50%);
   display: flex;
   gap: 2vw;
-  z-index: 1000;
+  z-index: 300;
   width: 80%;
   max-width: 400px;
   justify-content: center;
@@ -183,62 +195,148 @@ body {
 }
 
 .chat-holder .input-container {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
 }
 
 .chat-holder .input input {
   flex: 1;
-  padding: 10px 15px;
-  border: none;
-  border-radius: 15px;
+  padding: 12px 80px 12px 15px;
+  border: 2px solid #FFFF00;
+  border-radius: 25px;
   font-size: 14px;
-  background-color: #333;
+  background-color: #222;
   color: #FFFF00;
   outline: none;
 }
 
+.chat-holder .input input::placeholder {
+  color: #888;
+}
+
+.chat-holder .input input:focus {
+  border-color: #FFEE00;
+  box-shadow: 0 0 10px rgba(255, 255, 0, 0.3);
+}
+
 .chat-holder .input button {
-  flex-shrink: 0;
+  position: absolute;
+  right: 5px;
   background-color: #FFFF00;
   color: #000;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: bold;
-  padding: 10px 20px;
+  padding: 8px 16px;
   border: none;
-  border-radius: 10px;
+  border-radius: 20px;
   cursor: pointer;
   transition: all 0.3s ease;
+  text-transform: uppercase;
 }
 
 .chat-holder .input button:hover {
   background-color: #FFEE00;
-  transform: scale(1.05);
+  box-shadow: 0 0 15px rgba(255, 255, 0, 0.5);
+}
+
+.chat-holder .input button .glitch-text {
+  animation: none;
+  text-shadow: none;
+}
+
+.cyber-button .glitch-text {
+  animation: none !important;
 }
 
 .modal {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  justify-content: center;
   align-items: center;
-  z-index: 2000;
-  background-color: rgba(0, 0, 0, 0.7);
-  padding-top: 20vh;
+  z-index: 200;
+  background-color: rgba(0, 0, 0, 0.85);
+  gap: 30px;
+  border-radius: 18px;
+}
+
+@media only screen and (max-width: 1000px) {
+  .modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 0;
+  }
+}
+
+@media only screen and (max-width: 600px) {
+  .modal {
+    gap: 20px;
+  }
+}
+
+#spinner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 20px;
 }
 
-@media only screen and (min-width: 601px) {
-  .modal {
-    padding-top: 0;          
-    justify-content: center; 
-  }
+.loading-text {
+  font-family: 'Courier New', monospace;
+  font-size: 16px;
+  color: #FFFF00;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  text-shadow: 0 0 10px rgba(255, 255, 0, 0.5);
+}
 
+.loading-dots {
+  display: flex;
+  gap: 12px;
+}
+
+.loading-dots span {
+  width: 14px;
+  height: 14px;
+  background-color: #FFFF00;
+  border-radius: 50%;
+  animation: bounce 1.4s infinite ease-in-out both;
+  box-shadow: 0 0 15px rgba(255, 255, 0, 0.6);
+}
+
+.loading-dots span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0s;
+}
+
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media only screen and (min-width: 601px) {
   .notification {
     position: absolute;
     top: 50%;
@@ -247,7 +345,7 @@ body {
   }
 }
 
-#spinner {
+#spinner-old {
   position: relative;
   font-size: 16px;
   color: #FFFF00;
