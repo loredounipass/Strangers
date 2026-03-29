@@ -612,25 +612,51 @@ function setupUIEvents() {
     restartConnection();
   });
   
-  DOM.cameraBtn.addEventListener('click', async () => {
-    if (STATE.localStream) {
-      STATE.isCameraOff = !STATE.isCameraOff;
-      STATE.localStream.getVideoTracks().forEach(t => t.enabled = !STATE.isCameraOff);
-      DOM.cameraBtn.querySelector('.glitch-text').textContent = STATE.isCameraOff ? 'ON' : 'OFF';
-      showNotification(STATE.isCameraOff ? 'Video OFF' : 'Video ON');
+  // Camera toggle
+  DOM.cameraBtn.addEventListener('click', () => {
+    if (!STATE.localStream) {
+      showNotification('No camera available');
+      return;
     }
+    
+    const videoTracks = STATE.localStream.getVideoTracks();
+    if (videoTracks.length === 0) {
+      showNotification('No video track');
+      return;
+    }
+    
+    STATE.isCameraOff = !STATE.isCameraOff;
+    videoTracks.forEach(track => {
+      track.enabled = !STATE.isCameraOff;
+    });
+    
+    DOM.cameraBtn.querySelector('.glitch-text').textContent = STATE.isCameraOff ? 'ON' : 'OFF';
+    showNotification(STATE.isCameraOff ? 'Video OFF' : 'Video ON');
   });
   
+  // Mute toggle
   let isMuted = false;
   const muteBtn = document.getElementById('muteBtn');
   if (muteBtn) {
     muteBtn.addEventListener('click', () => {
-      if (STATE.localStream) {
-        isMuted = !isMuted;
-        STATE.localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
-        muteBtn.querySelector('.glitch-text').textContent = isMuted ? 'OFF' : 'ON';
-        showNotification(isMuted ? 'Audio OFF' : 'Audio ON');
+      if (!STATE.localStream) {
+        showNotification('No audio available');
+        return;
       }
+      
+      const audioTracks = STATE.localStream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        showNotification('No audio track');
+        return;
+      }
+      
+      isMuted = !isMuted;
+      audioTracks.forEach(track => {
+        track.enabled = !isMuted;
+      });
+      
+      muteBtn.querySelector('.glitch-text').textContent = isMuted ? 'ON' : 'OFF';
+      showNotification(isMuted ? 'Audio OFF' : 'Audio ON');
     });
   }
   
