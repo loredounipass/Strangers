@@ -126,6 +126,7 @@ io.on('connection', (socket) => {
             const type = (0, lib_1.getType)(socket.id, roomArr);
             if (type && 'type' in type) {
                 const target = type.type === 'p1' ? type.p2id : type.p1id;
+                console.log(`[SOCKET] ICE from ${socket.id} -> ${target}`);
                 if (target)
                     io.to(target).emit('ice:reply', { candidate: data.candidate, from: socket.id });
             }
@@ -137,6 +138,7 @@ io.on('connection', (socket) => {
     });
     // SDP
     socket.on('sdp:send', (data) => {
+        var _a;
         try {
             // Validar que sdp sea un objeto válido con type y sdp
             if (!data || !data.sdp || typeof data.sdp !== 'object' || !data.sdp.type) {
@@ -146,6 +148,7 @@ io.on('connection', (socket) => {
             const type = (0, lib_1.getType)(socket.id, roomArr);
             if (type && 'type' in type) {
                 const target = type.type === 'p1' ? type.p2id : type.p1id;
+                console.log(`[SOCKET] SDP (${(_a = data.sdp) === null || _a === void 0 ? void 0 : _a.type}) from ${socket.id} -> ${target}`);
                 if (target)
                     io.to(target).emit('sdp:reply', { sdp: data.sdp, from: socket.id });
             }
@@ -182,6 +185,20 @@ io.on('connection', (socket) => {
     socket.on('reconnect', (attemptNumber) => {
         console.log(`Client reconnected after ${attemptNumber} attempts`);
         socket.emit('reconnected');
+    });
+    // RENEGOTIATE - forward to partner to coordinate adding/removing tracks
+    socket.on('renegotiate', () => {
+        try {
+            const type = (0, lib_1.getType)(socket.id, roomArr);
+            if (type && 'type' in type) {
+                const targetId = type.type === 'p1' ? type.p2id : type.p1id;
+                if (targetId)
+                    io.to(targetId).emit('renegotiate', { from: socket.id });
+            }
+        }
+        catch (error) {
+            console.error('Error in renegotiate handler:', error);
+        }
     });
     // Verificar el estado de la sala antes de proceder con el "Next"
     socket.on('check-room-status', (roomid, callback) => {

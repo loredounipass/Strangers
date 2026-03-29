@@ -129,6 +129,7 @@ socket.on('ice:send', (data: { candidate: any }) => {
     const type: GetTypesResult = getType(socket.id, roomArr);
     if (type && 'type' in type) {
       const target = type.type === 'p1' ? type.p2id : type.p1id;
+      console.log(`[SOCKET] ICE from ${socket.id} -> ${target}`);
       if (target) io.to(target).emit('ice:reply', { candidate: data.candidate, from: socket.id });
     }
   } catch (error) {
@@ -149,6 +150,7 @@ socket.on('sdp:send', (data: { sdp: any }) => {
     const type = getType(socket.id, roomArr);
     if (type && 'type' in type) {
       const target = type.type === 'p1' ? type.p2id : type.p1id;
+      console.log(`[SOCKET] SDP (${data.sdp?.type}) from ${socket.id} -> ${target}`);
       if (target) io.to(target).emit('sdp:reply', { sdp: data.sdp, from: socket.id });
     }
   } catch (error) {
@@ -184,6 +186,19 @@ socket.on('sdp:send', (data: { sdp: any }) => {
   socket.on('reconnect', (attemptNumber: number) => {
     console.log(`Client reconnected after ${attemptNumber} attempts`);
     socket.emit('reconnected');
+  });
+
+  // RENEGOTIATE - forward to partner to coordinate adding/removing tracks
+  socket.on('renegotiate', () => {
+    try {
+      const type = getType(socket.id, roomArr);
+      if (type && 'type' in type) {
+        const targetId = type.type === 'p1' ? type.p2id : type.p1id;
+        if (targetId) io.to(targetId).emit('renegotiate', { from: socket.id });
+      }
+    } catch (error) {
+      console.error('Error in renegotiate handler:', error);
+    }
   });
 
   // Verificar el estado de la sala antes de proceder con el "Next"

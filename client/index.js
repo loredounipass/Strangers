@@ -3,7 +3,7 @@
 // ============================================
 
 import { io } from 'socket.io-client';
-import { getMediaStreamWithFallback, enableVideoTracks, enableAudioTracks, stopMediaStream, getStreamTracks } from './src/webrtc/media.js';
+import { getMediaStreamWithFallback, getAudioOnlyStream, enableVideoTracks, enableAudioTracks, stopMediaStream, getStreamTracks } from './src/webrtc/media.js';
 
 // ============================================
 // FSM - Finite State Machine
@@ -29,7 +29,7 @@ const STATE = {
   type: null,
   roomid: null,
   socket: null,
-  isCameraOff: false,
+  isCameraOff: true,
   isMuted: false,
   isExiting: false,
   isNegotiating: false,
@@ -173,13 +173,11 @@ function scheduleReconnect() {
   
   const delay = getBackoffDelay(STATE.retryCount);
   
-  log('RECONNECT', `Attempt ${STATE.retryCount}/${CONFIG.MAX_RECONNECT_RETRIES} in ${delay}ms`);
-  showNotification(`Reconnecting... (${STATE.retryCount}/${CONFIG.MAX_RECONNECT_RETRIES})`);
-  
   setAppState(AppState.RECONNECTING);
   
   setTimer('reconnect', () => {
-    fullCleanup();
+    // Use a light cleanup to preserve local media (don't drop the user's mic)
+    lightCleanup();
     restartConnection();
   }, delay);
 }
@@ -189,21 +187,17 @@ function scheduleReconnect() {
 // ============================================
 async function initMedia() {
   try {
-    // Reset camera state
-    STATE.isCameraOff = false;
+    // Start with camera OFF by default (audio-only stream)
+    STATE.isCameraOff = true;
     if (DOM.cameraBtn) {
-      DOM.cameraBtn.querySelector('.glitch-text').textContent = 'OFF';
+      DOM.cameraBtn.querySelector('.glitch-text').textContent = 'ON';
     }
-    
-    // Use fallback-aware media initialization
-    STATE.localStream = await getMediaStreamWithFallback((err) => {
-      log('MEDIA', 'Fallback triggered', err.name);
-    });
-    
-    // Ensure all tracks are enabled
-    enableVideoTracks(STATE.localStream);
+
+    // Initialize audio-only stream to avoid prompting for camera
+    STATE.localStream = await getAudioOnlyStream();
     enableAudioTracks(STATE.localStream);
-    
+
+    // Attach audio-only stream to local video element (will be blank until camera added)
     DOM.myVideo.srcObject = STATE.localStream;
     DOM.myVideo.muted = true;
     
@@ -291,7 +285,8 @@ function createPeerConnection() {
   
   STATE.peer.onicecandidate = (e) => {
     if (e.candidate && STATE.remoteSocket) {
-      STATE.socket.emit('ice:send', { candidate: e.candidate });
+      log('ICE', 'Sending candidate', e.candidate);
+      try { STATE.socket.emit('ice:send', { candidate: e.candidate }); } catch (e) {}
     }
   };
   
@@ -326,7 +321,7 @@ function createPeerConnection() {
   };
   
   STATE.peer.onnegotiationneeded = () => {
-    if (STATE.type === 'p1' && STATE.peer.signalingState === 'stable') {
+    if (STATE.peer.signalingState === 'stable') {
       createOffer();
     }
   };
@@ -405,7 +400,8 @@ async function createOffer() {
     });
     
     await STATE.peer.setLocalDescription(offer);
-    STATE.socket.emit('sdp:send', { sdp: STATE.peer.localDescription });
+    log('SDP', 'Sending offer', STATE.peer.localDescription.type);
+    try { STATE.socket.emit('sdp:send', { sdp: STATE.peer.localDescription }); } catch (e) {}
     
     log('SDP', 'Offer sent');
   } catch (err) {
@@ -415,25 +411,46 @@ async function createOffer() {
 }
 
 async function handleSdp(sdp) {
-  if (!STATE.peer) return;
-  
-  if (STATE.peer.signalingState === 'stable' && sdp.type === 'answer') {
+  if (!STATE.peer) {
+    STATE.pendingSdp = sdp;
     return;
   }
-  
+
+  // If SDP cannot be applied in current signaling state, queue it
+  const state = STATE.peer.signalingState;
   try {
-    await STATE.peer.setRemoteDescription(new RTCSessionDescription(sdp));
-    
-    if (STATE.type === 'p2' && sdp.type === 'offer') {
+    if (sdp.type === 'offer') {
+      if (state !== 'stable') {
+        // Can't handle offer now
+        STATE.pendingSdp = sdp;
+        return;
+      }
+
+      await STATE.peer.setRemoteDescription(new RTCSessionDescription(sdp));
+      // Create and send answer
       const answer = await STATE.peer.createAnswer();
       await STATE.peer.setLocalDescription(answer);
-      STATE.socket.emit('sdp:send', { sdp: STATE.peer.localDescription });
+        log('SDP', 'Sending answer', STATE.peer.localDescription.type);
+        try { STATE.socket.emit('sdp:send', { sdp: STATE.peer.localDescription }); } catch (e) {}
       log('SDP', 'Answer sent');
+
+    } else if (sdp.type === 'answer') {
+      // We must be in have-local-offer to set the remote answer
+      if (state !== 'have-local-offer' && state !== 'stable') {
+        STATE.pendingSdp = sdp;
+        return;
+      }
+
+      await STATE.peer.setRemoteDescription(new RTCSessionDescription(sdp));
     }
-    
+
     STATE.isNegotiating = false;
   } catch (err) {
     log('ERROR', 'handleSdp failed', err);
+    // If setting failed due to wrong state, requeue
+    if (err && err.name === 'InvalidStateError') {
+      STATE.pendingSdp = sdp;
+    }
   }
 }
 
@@ -442,12 +459,19 @@ async function handleSdp(sdp) {
 // ============================================
 async function handleIce(candidate) {
   if (!STATE.peer) {
-    STATE.pendingIceCandidates.push(candidate);
+    // queue without duplicates
+    const key = candidate && candidate.candidate ? candidate.candidate : JSON.stringify(candidate);
+    if (!STATE.pendingIceCandidates.some(c => (c && c.candidate ? c.candidate : JSON.stringify(c)) === key)) {
+      STATE.pendingIceCandidates.push(candidate);
+    }
     return;
   }
   
   if (!STATE.peer.remoteDescription || !STATE.peer.remoteDescription.type) {
-    STATE.pendingIceCandidates.push(candidate);
+    const key = candidate && candidate.candidate ? candidate.candidate : JSON.stringify(candidate);
+    if (!STATE.pendingIceCandidates.some(c => (c && c.candidate ? c.candidate : JSON.stringify(c)) === key)) {
+      STATE.pendingIceCandidates.push(candidate);
+    }
     return;
   }
   
@@ -467,8 +491,19 @@ function processPendingMessages() {
   }
   
   if (STATE.pendingSdp) {
-    handleSdp(STATE.pendingSdp);
-    STATE.pendingSdp = null;
+    // Try to process pending SDP only if signaling state allows
+    const s = STATE.pendingSdp;
+    const st = STATE.peer.signalingState;
+    if (s.type === 'offer' && st === 'stable') {
+      const temp = s;
+      STATE.pendingSdp = null;
+      handleSdp(temp);
+    } else if (s.type === 'answer' && (st === 'have-local-offer' || st === 'stable')) {
+      const temp = s;
+      STATE.pendingSdp = null;
+      handleSdp(temp);
+    }
+    // otherwise leave it queued for later
   }
 }
 
@@ -584,6 +619,33 @@ function fullCleanup() {
   log('CLEANUP', 'Complete');
 }
 
+// Light cleanup: close peer and timers but preserve localStream and local video
+function lightCleanup() {
+  clearAllTimers();
+
+  if (statsInterval) {
+    clearInterval(statsInterval);
+    statsInterval = null;
+  }
+
+  STATE.videoPlayRetries = 0;
+  STATE.pendingSdp = null;
+  STATE.pendingIceCandidates = [];
+  STATE.currentQualityLevel = 'high';
+  STATE.isNegotiating = false;
+
+  if (STATE.peer) {
+    try { STATE.peer.close(); } catch (e) {}
+    STATE.peer = null;
+  }
+
+  // Keep STATE.localStream and DOM.myVideo.srcObject intact so user doesn't lose mic permission
+  DOM.strangerVideo.srcObject = null;
+  DOM.spinner.style.display = 'flex';
+
+  // light cleanup performed (no logs)
+}
+
 // ============================================
 // RESTART
 // ============================================
@@ -636,6 +698,12 @@ function setupSocketEvents() {
     
     // Create peer connection
     createPeerConnection();
+    // Send our current media state to the peer so they can reflect camera/audio immediately
+    try {
+      if (STATE.socket && STATE.roomid) {
+        STATE.socket.emit('media:state', { cameraOff: STATE.isCameraOff, muted: STATE.isMuted, roomid: STATE.roomid, type: STATE.type });
+      }
+    } catch (e) {}
     
     // If we already have a stream, process pending messages
     if (STATE.localStream) {
@@ -645,11 +713,58 @@ function setupSocketEvents() {
   
   STATE.socket.on('disconnected', () => {
     if (!STATE.isExiting) {
+      // If we had a matched partner, treat this as partner leaving: do not attempt automatic reconnect
+      if (STATE.remoteSocket) {
+        showNotification('Partner disconnected.');
+        setAppState(AppState.IDLE);
+        fullCleanup();
+        // Do not scheduleReconnect() when the other user intentionally left
+        return;
+      }
+
+      // Otherwise, treat as connection/loss and attempt reconnect
       showNotification('Disconnected. Searching...');
       setAppState(AppState.DISCONNECTED);
       fullCleanup();
       scheduleReconnect();
     }
+  });
+
+  // Remote media state updates (camera/audio on-off)
+  STATE.socket.on('media:state', ({ cameraOff, muted, type }) => {
+    log('SOCKET', `Remote media state: cameraOff=${cameraOff} muted=${muted} type=${type}`);
+
+    // If the remote turned camera off, pause/hide their video and show placeholder
+    if (cameraOff) {
+      try {
+        if (DOM.strangerVideo) {
+          DOM.strangerVideo.pause();
+          DOM.strangerVideo.style.opacity = '0.3';
+          DOM.strangerVideo.dataset.cameraOff = '1';
+        }
+      } catch (e) {}
+    } else {
+      try {
+        if (DOM.strangerVideo) {
+          DOM.strangerVideo.style.opacity = '1';
+          delete DOM.strangerVideo.dataset.cameraOff;
+          attemptPlay();
+        }
+      } catch (e) {}
+    }
+
+    // Respect remote audio mute state by muting/unmuting remote video element
+    if (typeof muted === 'boolean' && DOM.strangerVideo) {
+      DOM.strangerVideo.muted = muted;
+    }
+  });
+
+  // Peer requested renegotiation (partner is changing tracks)
+  STATE.socket.on('renegotiate', ({ from }) => {
+    // When partner requests renegotiation, we should avoid creating our own offer
+    // and be ready to respond. If we're currently stable and not negotiating, do nothing.
+    // If local needs to renegotiate later, it will emit its own 'renegotiate'.
+    log('SOCKET', `Renegotiate requested from ${from}`);
   });
   
   STATE.socket.on('disconnect-confirm', fullCleanup);
@@ -705,18 +820,82 @@ function setupUIEvents() {
     }
     
     const { video } = getStreamTracks(STATE.localStream);
-    if (video.length === 0) {
-      showNotification('No video track');
+
+    // If we don't have any video tracks yet and user requested camera ON, request camera
+    if (video.length === 0 && STATE.isCameraOff) {
+      showNotification('Requesting camera...');
+      getMediaStreamWithFallback((err) => {
+        log('MEDIA', 'Fallback camera init triggered', err && err.name);
+      }).then(newStream => {
+        const newVideo = newStream.getVideoTracks();
+        if (!newVideo || newVideo.length === 0) {
+          showNotification('No camera found');
+          // stop any tracks from the helper stream
+          newStream.getTracks().forEach(t => t.stop());
+          return;
+        }
+
+        // Add video tracks to our existing local stream and to peer
+        newVideo.forEach(track => {
+          try {
+            STATE.localStream.addTrack(track);
+          } catch (e) {}
+          try {
+            if (STATE.peer) {
+              STATE.peer.addTrack(track, STATE.localStream);
+            }
+          } catch (e) {}
+        });
+
+        // stop audio tracks from the helper stream to avoid duplicates
+        newStream.getAudioTracks().forEach(t => t.stop());
+
+        // Update UI and state
+        STATE.isCameraOff = false;
+        DOM.cameraBtn.querySelector('.glitch-text').textContent = 'OFF';
+        DOM.myVideo.srcObject = STATE.localStream;
+        showNotification('Video ON');
+
+        // Coordinate renegotiation: inform peer and attempt offer when stable
+        try {
+          if (STATE.socket && STATE.roomid) {
+            STATE.socket.emit('renegotiate');
+          }
+
+          // attempt createOffer after short delay if signalingState allows
+          setTimeout(() => {
+            try {
+              if (STATE.peer && STATE.peer.signalingState === 'stable' && !STATE.isNegotiating) {
+                createOffer();
+              }
+            } catch (e) {}
+          }, 250);
+        } catch (e) {}
+
+        // Notify peer about media state as well
+        try { if (STATE.socket && STATE.roomid) STATE.socket.emit('media:state', { cameraOff: STATE.isCameraOff, muted: STATE.isMuted, roomid: STATE.roomid, type: STATE.type }); } catch (e) {}
+      }).then(null, err => {
+        log('MEDIA', 'Could not access camera', err && err.name);
+        showNotification('Could not access camera');
+      });
+
       return;
     }
-    
+
+    // Toggle existing video tracks
     STATE.isCameraOff = !STATE.isCameraOff;
     video.forEach(track => {
       track.enabled = !STATE.isCameraOff;
     });
-    
+
     DOM.cameraBtn.querySelector('.glitch-text').textContent = STATE.isCameraOff ? 'ON' : 'OFF';
     showNotification(STATE.isCameraOff ? 'Video OFF' : 'Video ON');
+    // Notify peer about camera state change
+    try {
+      if (STATE.socket && STATE.roomid) {
+        STATE.socket.emit('media:state', { cameraOff: STATE.isCameraOff, muted: STATE.isMuted, roomid: STATE.roomid, type: STATE.type });
+      }
+    } catch (e) {}
   });
   
   const muteBtn = document.getElementById('muteBtn');
@@ -740,6 +919,12 @@ function setupUIEvents() {
       
       muteBtn.querySelector('.glitch-text').textContent = STATE.isMuted ? 'ON' : 'OFF';
       showNotification(STATE.isMuted ? 'Audio OFF' : 'Audio ON');
+      // Notify peer about audio state change
+      try {
+        if (STATE.socket && STATE.roomid) {
+          STATE.socket.emit('media:state', { cameraOff: STATE.isCameraOff, muted: STATE.isMuted, roomid: STATE.roomid, type: STATE.type });
+        }
+      } catch (e) {}
     });
   }
   
