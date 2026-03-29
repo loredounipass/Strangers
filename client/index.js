@@ -373,9 +373,27 @@ function setupPeerConnection() {
     .filter(c => c.mimeType.toLowerCase().includes('vp9') || c.mimeType.toLowerCase().includes('av1'))
     .sort((a, b) => (b.clockRate || 0) - (a.clockRate || 0));
   
-    if (preferredCodecs.length > 0) {
-    console.log('[PEER] Codecs preferidos:', preferredCodecs.map(c => c.mimeType).join(', '));
-  }
+    // Prioritize widely supported codecs: VP8 > VP9 > AV1 > H264
+    const codecPriority = ['vp8', 'vp9', 'av1', 'h264'];
+    const sortedCodecs = codecPriority
+      .map(prefix => codecs
+        .filter(c => c.mimeType.toLowerCase().includes(prefix))
+        .sort((a, b) => (b.clockRate || 0) - (a.clockRate || 0)))
+      .filter(group => group.length > 0)
+      .reduce((acc, group) => acc.concat(group), []);
+    
+    if (sortedCodecs.length > 0) {
+      console.log('[PEER] Codecs ordenados por prioridad:', sortedCodecs.map(c => c.mimeType).join(', '));
+      // Optionally set codecs via setCodecPreferences if supported (Chrome 74+)
+      if (typeof peer.setCodecPreferences === 'function') {
+        try {
+          peer.setCodecPreferences(sortedCodecs);
+          console.log('[PEER] Codec preferences establecidas');
+        } catch (e) {
+          console.warn('[PEER] No se pudo establecer codec preferences:', e);
+        }
+      }
+    }
 
   // Timeout para ICE connection - solo activar después de crear offer
   let iceTimeoutStarted = false;
@@ -436,13 +454,35 @@ function setupPeerConnection() {
     }
   };
 
+  let iceFailedNotified = false;
+  let iceDisconnectedStartTime = 0;
+  
   peer.oniceconnectionstatechange = () => {
-    console.log('[PEER] Estado ICE:', peer.iceConnectionState);
+    console.log('[PEER] Estado ICE:', peer.iceConnectionState, '| ICE gathering state:', peer.iceGatheringState);
     
     if (peer.iceConnectionState === 'failed') {
       console.error('[PEER] ICE fallido');
-      handleConnectionError('ice-failed');
+      if (!iceFailedNotified) {
+        iceFailedNotified = true;
+        handleConnectionError('ice-failed');
+      }
+    } else if (peer.iceConnectionState === 'disconnected') {
+      console.warn('[PEER] ICE desconectado');
+      if (iceDisconnectedStartTime === 0) {
+        iceDisconnectedStartTime = Date.now();
+      }
+      
+      // If disconnected for more than 5 seconds, treat as error
+      const disconnectedDuration = Date.now() - iceDisconnectedStartTime;
+      if (disconnectedDuration > 5000 && !iceFailedNotified) {
+        console.warn('[PEER] ICE desconectado por demasiado tiempo, tratándolo como fallo');
+        iceFailedNotified = true;
+        handleConnectionError('ice-disconnected-timeout');
+      }
     } else if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
+      console.log('[PEER] ICE conectado exitosamente');
+      iceFailedNotified = false;
+      iceDisconnectedStartTime = 0;
       if (iceTimeout) {
         clearTimeout(iceTimeout);
         iceTimeout = null;
