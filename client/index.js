@@ -245,40 +245,34 @@ function setupSocketEvents() {
   });
 
 // WebRTC
-   socket.on('sdp:reply', async ({ sdp }) => {
-     if (!peer) return;
+    socket.on('sdp:reply', async ({ sdp }) => {
+      if (!peer) return;
 
-     try {
-       await peer.setRemoteDescription(new RTCSessionDescription(sdp));
-       if (type === 'p2') {
-         const answer = await peer.createAnswer();
-         await peer.setLocalDescription(answer);
-         socket.emit('sdp:send', { sdp: peer.localDescription });
-       }
-     } catch (err) {
-       console.error('Error handling SDP reply:', err);
-     }
-   });
+      try {
+        await peer.setRemoteDescription(new RTCSessionDescription(sdp));
+        if (type === 'p2') {
+          const answer = await peer.createAnswer();
+          await peer.setLocalDescription(answer);
+          socket.emit('sdp:send', { sdp: peer.localDescription });
+        } else if (type === 'p1') {
+          // Si somos p1 y recibimos sdp:reply, es la respuesta del p2
+          // No necesitamos hacer nada más aquí, ya que ya enviamos nuestra oferta
+          // y establecimos nuestra descripción local en createOffer()
+        }
+      } catch (err) {
+        console.error('Error handling SDP reply:', err);
+      }
+    });
 
-   socket.on('ice:reply', async ({ candidate }) => {
-     if (!peer) return;
+    socket.on('ice:reply', async ({ candidate }) => {
+      if (!peer) return;
 
-     try {
-       await peer.addIceCandidate(new RTCIceCandidate(candidate));
-     } catch (err) {
-       console.error('Error handling ICE candidate:', err);
-     }
-   });
-
-   socket.on('ice:reply', async ({ candidate }) => {
-     if (!peer) return;
-
-     try {
-       await peer.addIceCandidate(new RTCIceCandidate(candidate));
-     } catch (err) {
-       console.error('Error handling ICE candidate:', err);
-     }
-   });
+      try {
+        await peer.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.error('Error handling ICE candidate:', err);
+      }
+    });
 
   // Chat
   socket.on('typing', (isTyping) => {
