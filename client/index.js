@@ -325,12 +325,17 @@ function setupVideoListeners() {
   
   strangerVideo.onwaiting = () => {
     console.warn('[VIDEO] Video waiting - intentando reproducir');
+    // Cuando está waiting, puede ser que necesite más datos o haya un retraso
     attemptVideoPlay();
+    // Reintentar después de un corto delay
+    setTimeout(attemptVideoPlay, 500);
   };
   
   strangerVideo.onstalled = () => {
     console.warn('[VIDEO] Video stalled - reintentando');
     attemptVideoPlay();
+    // Reintentar después de un delay mayor para stalled
+    setTimeout(attemptVideoPlay, 1000);
   };
   
   strangerVideo.onerror = (e) => {
@@ -349,6 +354,14 @@ function setupVideoListeners() {
       attemptVideoPlay();
     }
   }, 2000);
+  
+  // También verificar en visibilitychange para cuando la tab vuelve a ser visible
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && strangerVideo.srcObject) {
+      console.log('[VIDEO] Tab visible nuevamente - verificando reproducción');
+      attemptVideoPlay();
+    }
+  });
 }
 
 // Detectar y manejar errores de conexión
@@ -843,11 +856,12 @@ function setupSocketEvents() {
     // Reiniciar contadores de retry
     videoPlayRetries = 0;
     
-    // Asegurar que tenemos media primero
+    // Crear peer connection PRIMERO, para estar listo para recibir SDP
+    setupPeerConnection();
+    
+    // Luego inicializar media
     initMedia().then(() => {
-      // Crear peer connection con media lista
-      setupPeerConnection();
-      
+      // Si somos p1, crear offer después de que todo esté listo
       if (type === 'p1') {
         console.log('[WEBRTC] Soy p1, creando offer...');
         // Pequeño delay para asegurar que el peer está listo
@@ -857,12 +871,29 @@ function setupSocketEvents() {
           }
         }, 300);
       }
+      
+      // Si tenemos SDP pendiente (llegó antes de que estuviera listo), procesarlo ahora
+      if (pendingSdp) {
+        console.log('[WEBRTC] Procesando SDP pendiente con peer listo...');
+        processPendingMessages();
+      }
     }).catch((err) => {
       console.error('[SOCKET] Error initMedia:', err);
-      // Continuar aunque falle initMedia
-      setupPeerConnection();
+      // Continuar aunque falle initMedia - el peer ya está creado
       if (type === 'p1') {
-        createOffer();
+        console.log('[WEBRTC] Soy p1, creando offer...');
+        // Pequeño delay para asegurar que el peer está listo
+        setTimeout(() => {
+          if (peer && peer.signalingState === 'stable') {
+            createOffer();
+          }
+        }, 300);
+      }
+      
+      // Si tenemos SDP pendiente, procesarlo ahora
+      if (pendingSdp) {
+        console.log('[WEBRTC] Procesando SDP pendiente con peer listo...');
+        processPendingMessages();
       }
     });
   });
@@ -1249,11 +1280,14 @@ function processPendingMessagesGlobal() {
 // Handlers globales para mensajes pendientes
 function handleIceGlobal(candidate) {
   if (!peer) {
+    console.debug('[ICE] Peer no existe, guardando para después');
     pendingIceCandidates.push(candidate);
     return;
   }
   
+  // Solo procesar ICE si tenemos remote description
   if (!peer.remoteDescription || !peer.remoteDescription.type) {
+    console.debug('[ICE] No hay remote description completa, guardando...');
     pendingIceCandidates.push(candidate);
     return;
   }
@@ -1261,7 +1295,7 @@ function handleIceGlobal(candidate) {
   try {
     peer.addIceCandidate(new RTCIceCandidate(candidate))
       .then(() => {
-        console.log('[ICE] ICE candidate añadido correctamente');
+        console.debug('[ICE] ICE candidate añadido correctamente');
       })
       .catch(err => {
         console.error('[ICE] Error añadiendo candidate:', err);
