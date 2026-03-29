@@ -223,21 +223,27 @@ body {
 .chat-holder .input button {
   position: absolute;
   right: 5px;
-  background-color: #FFFF00;
+  background: linear-gradient(135deg, #FFEE00, #FFFF00);
   color: #000;
   font-size: 12px;
   font-weight: bold;
-  padding: 8px 16px;
+  padding: 8px 18px;
   border: none;
   border-radius: 20px;
   cursor: pointer;
   transition: all 0.3s ease;
   text-transform: uppercase;
+  box-shadow: 0 0 10px rgba(255, 255, 0, 0.4);
 }
 
 .chat-holder .input button:hover {
-  background-color: #FFEE00;
-  box-shadow: 0 0 15px rgba(255, 255, 0, 0.5);
+  background: linear-gradient(135deg, #FFFF00, #FFF700);
+  box-shadow: 0 0 20px rgba(255, 255, 0, 0.8);
+  transform: scale(1.05);
+}
+
+.chat-holder .input button:active {
+  transform: scale(0.98);
 }
 
 .chat-holder .input button .glitch-text {
@@ -414,16 +420,7 @@ body {
 }
 
 .scanline {
-  position: absolute;
-  width: 100%;
-  height: 2px;
-  background: rgba(0, 255, 255, 0.3);
-  animation: scanline 3s linear infinite;
-}
-
-@keyframes scanline {
-  0% { top: -100%; }
-  100% { top: 100%; }
+  display: none;
 }
 
 
