@@ -33,7 +33,7 @@ function isMobile() {
 
 // Inicializar la aplicación:  usa tu url de uso o localhost:8000
 async function init() {
-  socket = io('https://probable-fiesta-gj54qrq5pjg2pw47-8000.app.github.dev');
+  socket = io('https://urban-capybara-jv4j5754gpw3qpv6-8000.app.github.dev');
   setupSocketEvents();
   await initMedia();
   setupUIEvents();
