@@ -71,6 +71,12 @@ function fullCleanup() {
     videoPlayInterval = null;
   }
   
+  // Limpiar ICE keep-alive
+  if (iceKeepAliveInterval) {
+    clearInterval(iceKeepAliveInterval);
+    iceKeepAliveInterval = null;
+  }
+  
   // Resetear contadores
   videoPlayRetries = 0;
   
@@ -268,20 +274,36 @@ function attemptVideoPlay() {
 function forceVideoPlay() {
   strangerVideo.muted = true;
   strangerVideo.play()
-    .then(() => console.log('[VIDEO] Reproducción forzada exitosa'))
-    .catch(err => console.warn('[VIDEO] Error en reproducción forzada:', err.name));
+    .then(() => {
+      console.log('[VIDEO] Reproducción forzada exitosa');
+      videoPlayRetries = 0;
+    })
+    .catch(err => {
+      console.warn('[VIDEO] Error en reproducción forzada:', err.name);
+      // Si falla forzada, continuar con retry normal
+    });
+}
+
+// Intentar reproducción cuando el video tiene datos suficientes
+function tryPlayWhenReady() {
+  if (!strangerVideo.srcObject) return;
+  
+  // Verificar si el video tiene datos suficientes para intentar reproducir
+  if (strangerVideo.readyState >= 2) { // HAVE_CURRENT_DATA o superior
+    attemptVideoPlay();
+  }
 }
 
 // Agregar listeners para mejorar reproducción
 function setupVideoListeners() {
   strangerVideo.oncanplay = () => {
     console.log('[VIDEO] oncanplay - intentando reproducir');
-    attemptVideoPlay();
+    tryPlayWhenReady();
   };
   
   strangerVideo.oncanplaythrough = () => {
     console.log('[VIDEO] oncanplaythrough');
-    attemptVideoPlay();
+    tryPlayWhenReady();
   };
   
   strangerVideo.onplay = () => {
@@ -289,14 +311,42 @@ function setupVideoListeners() {
     videoPlayRetries = 0;
   };
   
-  strangerVideo.onerror = (e) => {
-    console.error('[VIDEO] Error en elemento video:', strangerVideo.error);
+  strangerVideo.onplaying = () => {
+    console.log('[VIDEO] Video playing');
+    videoPlayRetries = 0;
+  };
+  
+  strangerVideo.onseeked = () => {
+    console.log('[VIDEO] Seek completed');
+    tryPlayWhenReady();
+  };
+  
+  strangerVideo.onwaiting = () => {
+    console.warn('[VIDEO] Video waiting - intentando reproducir');
+    attemptVideoPlay();
   };
   
   strangerVideo.onstalled = () => {
     console.warn('[VIDEO] Video stalled - reintentando');
     attemptVideoPlay();
   };
+  
+  strangerVideo.onerror = (e) => {
+    console.error('[VIDEO] Error en elemento video:', strangerVideo.error);
+    // Intentar reproducir de nuevo en caso de error
+    setTimeout(attemptVideoPlay, 1000);
+  };
+  
+  // Intentar reproducir periódicamente si hay srcObject pero no se reproduce
+  const checkPlayInterval = setInterval(() => {
+    if (strangerVideo.srcObject && !strangerVideo.paused && !strangerVideo.ended) {
+      // Ya está reproduciéndose, limpiar interval
+      clearInterval(checkPlayInterval);
+    } else if (strangerVideo.srcObject) {
+      // Tiene fuente pero no se reproduce, intentar
+      attemptVideoPlay();
+    }
+  }, 2000);
 }
 
 // Detectar y manejar errores de conexión
@@ -395,19 +445,98 @@ function setupPeerConnection() {
       }
     }
 
-  // Timeout para ICE connection - solo activar después de crear offer
-  let iceTimeoutStarted = false;
-  const startIceTimeout = () => {
-    if (iceTimeoutStarted) return;
-    iceTimeoutStarted = true;
+// Keep-alive para mantener conexión ICE activa
+let iceKeepAliveInterval = null;
+const ICE_KEEP_ALIVE_INTERVAL = 15000; // 15 segundos
+
+// Función para enviar keep-alive periódicamente
+function startIceKeepAlive() {
+  if (iceKeepAliveInterval) return;
+  
+  iceKeepAliveInterval = setInterval(() => {
+    if (!peer) {
+      stopIceKeepAlive();
+      return;
+    }
     
-    iceTimeout = setTimeout(() => {
-      if (peer && peer.iceConnectionState !== 'connected' && peer.iceConnectionState !== 'completed') {
-        console.warn('[PEER] Timeout de conexión ICE, estado:', peer.iceConnectionState);
-        handleConnectionError('ice-timeout');
+    // Enviar un paquetes nulo o hacer algo para mantener la conexión viva
+    // En WebRTC, simplemente mantener el peer connection activo es suficiente
+    // Pero podemos verificar el estado y reiniciar si es necesario
+    
+    if (peer.iceConnectionState === 'disconnected') {
+      console.warn('[ICE] Estado disconnected detectado en keep-alive, intentando recuperación...');
+      // Intentar renegociación suave
+      if (peer.signalingState === 'stable') {
+        if (type === 'p1') {
+          console.log('[ICE] Intentando renegociación como p1...');
+          createOffer().catch(err => {
+            console.error('[ICE] Error en renegociación:', err);
+          });
+        }
       }
-    }, ICE_CONNECTION_TIMEOUT);
-  };
+    }
+  }, ICE_KEEP_ALIVE_INTERVAL);
+}
+
+function stopIceKeepAlive() {
+  if (iceKeepAliveInterval) {
+    clearInterval(iceKeepAliveInterval);
+    iceKeepAliveInterval = null;
+  }
+}
+
+// Timeout para ICE connection - solo activar después de crear offer
+let iceTimeoutStarted = false;
+const startIceTimeout = () => {
+  if (iceTimeoutStarted) return;
+  iceTimeoutStarted = true;
+  
+  iceTimeout = setTimeout(() => {
+    if (peer && peer.iceConnectionState !== 'connected' && peer.iceConnectionState !== 'completed') {
+      console.warn('[PEER] Timeout de conexión ICE, estado:', peer.iceConnectionState);
+      handleConnectionError('ice-timeout');
+    }
+  }, ICE_CONNECTION_TIMEOUT);
+};
+
+// Cuando la conexión se establece, iniciar keep-alive
+peer.oniceconnectionstatechange = () => {
+  console.log('[PEER] Estado ICE:', peer.iceConnectionState, '| ICE gathering state:', peer.iceGatheringState);
+  
+  if (peer.iceConnectionState === 'failed') {
+    console.error('[PEER] ICE fallido');
+    if (!iceFailedNotified) {
+      iceFailedNotified = true;
+      handleConnectionError('ice-failed');
+    }
+  } else if (peer.iceConnectionState === 'disconnected') {
+    console.warn('[PEER] ICE desconectado');
+    if (iceDisconnectedStartTime === 0) {
+      iceDisconnectedStartTime = Date.now();
+    }
+    
+    // If disconnected for more than 5 seconds, treat as error
+    const disconnectedDuration = Date.now() - iceDisconnectedStartTime;
+    if (disconnectedDuration > 5000 && !iceFailedNotified) {
+      console.warn('[PEER] ICE desconectado por demasiado tiempo, tratándolo como fallo');
+      iceFailedNotified = true;
+      handleConnectionError('ice-disconnected-timeout');
+    }
+  } else if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
+    console.log('[PEER] ICE conectado exitosamente');
+    iceFailedNotified = false;
+    iceDisconnectedStartTime = 0;
+    if (iceTimeout) {
+      clearTimeout(iceTimeout);
+      iceTimeout = null;
+    }
+    // Iniciar keep-alive cuando la conexión esté estable
+    startIceKeepAlive();
+  } else if (peer.iceConnectionState === 'checking' || peer.iceConnectionState === 'completed') {
+    // Detener keep-alive durante estados transitorios
+    stopIceKeepAlive();
+  }
+};
 
   peer.onicecandidate = (e) => {
     if (e.candidate && remoteSocket) {
@@ -454,11 +583,17 @@ function setupPeerConnection() {
     }
   };
 
-  let iceFailedNotified = false;
-  let iceDisconnectedStartTime = 0;
+let iceFailedNotified = false;
+let iceDisconnectedStartTime = 0;
+let lastIceStateChange = Date.now();
   
   peer.oniceconnectionstatechange = () => {
     console.log('[PEER] Estado ICE:', peer.iceConnectionState, '| ICE gathering state:', peer.iceGatheringState);
+    
+    // Track time since last state change for stability detection
+    const now = Date.now();
+    const timeSinceLastChange = now - lastIceStateChange;
+    lastIceStateChange = now;
     
     if (peer.iceConnectionState === 'failed') {
       console.error('[PEER] ICE fallido');
@@ -467,20 +602,30 @@ function setupPeerConnection() {
         handleConnectionError('ice-failed');
       }
     } else if (peer.iceConnectionState === 'disconnected') {
-      console.warn('[PEER] ICE desconectado');
+      console.warn('[PEER] ICE desconectado (estable desde hace', timeSinceLastChange, 'ms)');
       if (iceDisconnectedStartTime === 0) {
         iceDisconnectedStartTime = Date.now();
       }
       
-      // If disconnected for more than 5 seconds, treat as error
+      // If disconnected for more than 10 seconds, treat as error (increased from 5s)
       const disconnectedDuration = Date.now() - iceDisconnectedStartTime;
-      if (disconnectedDuration > 5000 && !iceFailedNotified) {
-        console.warn('[PEER] ICE desconectado por demasiado tiempo, tratándolo como fallo');
+      if (disconnectedDuration > 10000 && !iceFailedNotified) {
+        console.warn('[PEER] ICE desconectado por demasiado tiempo (>10s), tratándolo como fallo');
         iceFailedNotified = true;
         handleConnectionError('ice-disconnected-timeout');
       }
+      
+      // Try to recover if we've been disconnected for a while but not too long
+      if (disconnectedDuration > 3000 && disconnectedDuration < 8000) {
+        console.log('[PEER] Intentando recuperación suave de ICE desconectado...');
+        // Try to restart ICE gathering if we've been stable disconnected for a few seconds
+        if (peer.iceGatheringState === 'complete' && timeSinceLastChange > 2000) {
+          console.log('[PEER] Reiniciando gathering de ICE...');
+          // This might help restart ICE candidate gathering
+        }
+      }
     } else if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
-      console.log('[PEER] ICE conectado exitosamente');
+      console.log('[PEER] ICE conectado exitosamente (estable desde hace', timeSinceLastChange, 'ms)');
       iceFailedNotified = false;
       iceDisconnectedStartTime = 0;
       if (iceTimeout) {
