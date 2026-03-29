@@ -24,7 +24,21 @@ let isExiting = false;
 
 // Cola para mensajes WebRTC que llegan antes del peer
 let pendingSdp = null;
-let pendingIceCandidates = []; 
+let pendingIceCandidates = [];
+
+// Control de reproducción de video
+let videoPlayRetries = 0;
+const MAX_VIDEO_PLAY_RETRIES = 5;
+let videoPlayInterval = null;
+
+// Preferencias de calidad
+let preferredVideoConstraints = null;
+
+// Detección de errores de conexión
+let connectionTimeout = null;
+let iceTimeout = null;
+const ICE_CONNECTION_TIMEOUT = 30000;
+const CONNECTION_RETRY_DELAY = 2000; 
 
 // NUEVA función para detectar móviles
 function isMobile() {
@@ -41,53 +55,129 @@ async function init() {
 
 // Función de limpieza completa
 function fullCleanup() {
+  console.log('[CLEANUP] Limpiando conexión...');
+  
+  // Limpiar timeouts
+  if (iceTimeout) {
+    clearTimeout(iceTimeout);
+    iceTimeout = null;
+  }
+  if (connectionTimeout) {
+    clearTimeout(connectionTimeout);
+    connectionTimeout = null;
+  }
+  if (videoPlayInterval) {
+    clearInterval(videoPlayInterval);
+    videoPlayInterval = null;
+  }
+  
+  // Resetear contadores
+  videoPlayRetries = 0;
+  
+  // Cerrar peer connection
   if (peer) {
     peer.close();
     peer = null;
   }
 
+  // Detener tracks de media
   if (localStream) {
     localStream.getTracks().forEach(track => track.stop());
     localStream = null;
   }
 
+  // Limpiar videos
   myVideo.srcObject = null;
   strangerVideo.srcObject = null;
 
+  // Resetear UI
   spinner.style.display = 'flex';
   chatWrapper.innerHTML = '';
   
   // Limpiar mensajes pendientes
   pendingSdp = null;
   pendingIceCandidates = [];
+  
+  console.log('[CLEANUP] Completado');
+}
+
+// Obtener la mejor resolución nativa del dispositivo
+async function getNativeVideoConstraints() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+    
+    if (videoDevices.length === 0) {
+      return {
+        width: { ideal: 1920, min: 1280 },
+        height: { ideal: 1080, min: 720 },
+        frameRate: { ideal: 30, min: 24 },
+        facingMode: "user"
+      };
+    }
+
+    // Intentar obtener la capacidad máxima del dispositivo
+    const deviceId = videoDevices[0].deviceId;
+    const capabilities = navigator.mediaDevices.getSupportedConstraints();
+    
+    const constraints = {
+      deviceId: deviceId ? { exact: deviceId } : undefined,
+      width: { ideal: 1920, max: 1920, min: 1280 },
+      height: { ideal: 1080, max: 1080, min: 720 },
+      frameRate: { ideal: 30, min: 24 },
+      facingMode: "user"
+    };
+
+    // Eliminar deviceId si no es soportado
+    if (!capabilities.deviceId) {
+      delete constraints.deviceId;
+    }
+
+    return constraints;
+  } catch (err) {
+    console.warn('[MEDIA] Error obteniendo resolución nativa:', err);
+    return {
+      width: { ideal: 1920, min: 1280 },
+      height: { ideal: 1080, min: 720 },
+      frameRate: { ideal: 30, min: 24 },
+      facingMode: "user"
+    };
+  }
 }
 
 // Inicializar cámara/micrófono
 async function initMedia() {
+  preferredVideoConstraints = await getNativeVideoConstraints();
+  
+  const audioConstraints = {
+    echoCancellation: { ideal: true },
+    noiseSuppression: { ideal: true },
+    autoGainControl: { ideal: true },
+    sampleRate: { ideal: 48000 },
+    channelCount: { ideal: 1 },
+    latency: { ideal: 0.01 }
+  };
+
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: { ideal: true },
-        noiseSuppression: { ideal: true },
-        autoGainControl: { ideal: true },
-        sampleRate: { ideal: 48000 },
-        channelCount: { ideal: 1 },
-        latency: { ideal: 0.01 }
-      },
-      video: {
-        width: { ideal: 1280, min: 640 },
-        height: { ideal: 720, min: 480 },
-        frameRate: { ideal: 30, min: 15 },
-        facingMode: "user"
-      }
+      audio: audioConstraints,
+      video: preferredVideoConstraints
     });
+    
     myVideo.srcObject = localStream;
-    myVideo.muted = true; 
+    myVideo.muted = true;
     
     const videoTrack = localStream.getVideoTracks()[0];
     if (videoTrack) {
+      const settings = videoTrack.getSettings();
+      console.log('[MEDIA] Resolución nativa obtenida:', settings.width, 'x', settings.height);
+      
       await videoTrack.applyConstraints({
-        advanced: [{ brightness: 0.5, contrast: 1.0, saturation: 1.2 }]
+        advanced: [
+          { brightness: 0.5, contrast: 1.0, saturation: 1.2 },
+          { width: { ideal: settings.width } },
+          { height: { ideal: settings.height } }
+        ]
       });
     }
   } catch (err) {
@@ -98,33 +188,18 @@ async function initMedia() {
     if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: { ideal: true },
-            noiseSuppression: { ideal: true },
-            autoGainControl: { ideal: true },
-            sampleRate: { ideal: 48000 },
-            channelCount: { ideal: 1 },
-            latency: { ideal: 0.01 }
-          },
+          audio: audioConstraints,
           video: false
         });
         myVideo.srcObject = localStream;
         myVideo.muted = true;
       } catch (audioErr) {
-        
+        console.error('[MEDIA] Error solo audio:', audioErr);
       }
     } else {
-      
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: { ideal: true },
-            noiseSuppression: { ideal: true },
-            autoGainControl: { ideal: true },
-            sampleRate: { ideal: 48000 },
-            channelCount: { ideal: 1 },
-            latency: { ideal: 0.01 }
-          },
+          audio: audioConstraints,
           video: {
             width: { ideal: 1280, min: 640 },
             height: { ideal: 720, min: 480 },
@@ -134,14 +209,7 @@ async function initMedia() {
         });
         myVideo.srcObject = localStream;
         myVideo.muted = true;
-        const videoTrack = localStream.getVideoTracks()[0];
-        if (videoTrack) {
-          await videoTrack.applyConstraints({
-            advanced: [{ brightness: 0.5, contrast: 1.0, saturation: 1.2 }]
-          });
-        }
       } catch (retryErr) {
-        
         if (!isExiting && !isMobile() && retryErr.name !== 'NotFoundError' && retryErr.name !== 'DevicesNotFoundError') {
           showNotification('No hay acceso');
         }
@@ -150,21 +218,178 @@ async function initMedia() {
   }
 }
 
+// Intentar reproducir el video con retry
+function attemptVideoPlay() {
+  if (!strangerVideo.srcObject) return;
+  
+  // Asegurar que el video esté muteado para reproducción automática
+  strangerVideo.muted = true;
+  
+  const tryPlay = () => {
+    if (!strangerVideo.srcObject) return;
+    
+    const playPromise = strangerVideo.play();
+    
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          console.log('[VIDEO] Reproducción iniciada correctamente');
+          videoPlayRetries = 0;
+          if (videoPlayInterval) {
+            clearInterval(videoPlayInterval);
+            videoPlayInterval = null;
+          }
+        })
+        .catch(err => {
+          videoPlayRetries++;
+          console.warn('[VIDEO] Error en reproducción:', err.name, 'Intento:', videoPlayRetries);
+          
+          // AbortError significa que el navegador canceló - intentar de nuevo con delay
+          if (err.name === 'AbortError' || err.name === 'NotAllowedError') {
+            if (videoPlayRetries < MAX_VIDEO_PLAY_RETRIES) {
+              const delay = Math.min(1000 * Math.pow(2, videoPlayRetries), 5000);
+              console.log('[VIDEO] Reintentando en', delay, 'ms (bloqueo automático)');
+              setTimeout(tryPlay, delay);
+            }
+          } else if (videoPlayRetries < MAX_VIDEO_PLAY_RETRIES) {
+            const delay = Math.min(1000 * Math.pow(2, videoPlayRetries), 5000);
+            setTimeout(tryPlay, delay);
+          } else {
+            console.error('[VIDEO] Máximo de intentos alcanzado');
+          }
+        });
+    }
+  };
+  
+  tryPlay();
+}
+
+// Forzar reproducción con interacción del usuario
+function forceVideoPlay() {
+  strangerVideo.muted = true;
+  strangerVideo.play()
+    .then(() => console.log('[VIDEO] Reproducción forzada exitosa'))
+    .catch(err => console.warn('[VIDEO] Error en reproducción forzada:', err.name));
+}
+
+// Agregar listeners para mejorar reproducción
+function setupVideoListeners() {
+  strangerVideo.oncanplay = () => {
+    console.log('[VIDEO] oncanplay - intentando reproducir');
+    attemptVideoPlay();
+  };
+  
+  strangerVideo.oncanplaythrough = () => {
+    console.log('[VIDEO] oncanplaythrough');
+    attemptVideoPlay();
+  };
+  
+  strangerVideo.onplay = () => {
+    console.log('[VIDEO] Reproducción iniciada');
+    videoPlayRetries = 0;
+  };
+  
+  strangerVideo.onerror = (e) => {
+    console.error('[VIDEO] Error en elemento video:', strangerVideo.error);
+  };
+  
+  strangerVideo.onstalled = () => {
+    console.warn('[VIDEO] Video stalled - reintentando');
+    attemptVideoPlay();
+  };
+}
+
+// Detectar y manejar errores de conexión
+function handleConnectionError(errorType) {
+  console.error('[CONNECTION] Error detectado:', errorType);
+  
+  if (iceTimeout) {
+    clearTimeout(iceTimeout);
+    iceTimeout = null;
+  }
+  if (connectionTimeout) {
+    clearTimeout(connectionTimeout);
+    connectionTimeout = null;
+  }
+  
+  showNotification('Conexión perdida. Reconectando...');
+  
+  setTimeout(() => {
+    if (!isExiting) {
+      fullCleanup();
+      restartConnection();
+    }
+  }, CONNECTION_RETRY_DELAY);
+}
+
 // Configurar la conexión WebRTC
 function setupPeerConnection() {
   console.log('[PEER] Creando RTCPeerConnection...');
   
+  // Limpiar conexiones anteriores
+  if (peer) {
+    peer.close();
+    peer = null;
+  }
+  
+  // Servidores ICE mejorados con múltiples STUN y TURN públicos
+  const iceServers = [
+    // Google STUN
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    
+    // Otros STUN públicos
+    { urls: 'stun:stun.stunprotocol.org:3478' },
+    { urls: 'stun:stun.voiparound.com' },
+    { urls: 'stun:stun.voipbuster.com' },
+    { urls: 'stun:stun.voxgratia.org' },
+    { urls: 'stun:stun.antisip.com' },
+    { urls: 'stun:stun.blinkenshell.org' },
+    { urls: 'stun:stun.ekiga.net' },
+    
+    // TURN públicos (limitado uso pero mejor que nada)
+    { urls: 'turn:turn.bistriz.com:80', username: 'homeo', credential: 'homeo' },
+    { urls: 'turn:turn.bistriz.com:443', username: 'homeo', credential: 'homeo' },
+    { urls: 'turn:turn.anyfirewall.com:443?transport=udp', username: 'webrtc', credential: 'webrtc' }
+  ];
+  
   peer = new RTCPeerConnection({
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' }
-    ],
-    iceCandidatePoolSize: 10,
+    iceServers: iceServers,
+    iceCandidatePoolSize: 20,
     bundlePolicy: 'max-bundle',
-    rtcpMuxPolicy: 'require'
+    rtcpMuxPolicy: 'require',
+    iceTransportPolicy: 'all', // Intentar todos los tipos de candidatos
+    // Configuraciones de tiempo para mejorar reconexión
+    iceConnectionTimeout: 15000,
+    iceDisconnectedTimeout: 30000
   });
+  
+  // Preferir codecs VP9/AV1 para mejor calidad
+  const codecs = RTCRtpSender.getCapabilities('video')?.codecs || [];
+  const preferredCodecs = codecs
+    .filter(c => c.mimeType.toLowerCase().includes('vp9') || c.mimeType.toLowerCase().includes('av1'))
+    .sort((a, b) => (b.clockRate || 0) - (a.clockRate || 0));
+  
+    if (preferredCodecs.length > 0) {
+    console.log('[PEER] Codecs preferidos:', preferredCodecs.map(c => c.mimeType).join(', '));
+  }
+
+  // Timeout para ICE connection - solo activar después de crear offer
+  let iceTimeoutStarted = false;
+  const startIceTimeout = () => {
+    if (iceTimeoutStarted) return;
+    iceTimeoutStarted = true;
+    
+    iceTimeout = setTimeout(() => {
+      if (peer && peer.iceConnectionState !== 'connected' && peer.iceConnectionState !== 'completed') {
+        console.warn('[PEER] Timeout de conexión ICE, estado:', peer.iceConnectionState);
+        handleConnectionError('ice-timeout');
+      }
+    }, ICE_CONNECTION_TIMEOUT);
+  };
 
   peer.onicecandidate = (e) => {
     if (e.candidate && remoteSocket) {
@@ -173,72 +398,79 @@ function setupPeerConnection() {
   };
 
   peer.ontrack = (e) => {
-    console.log('[PEER] Track recibido!', e.track.kind);
-    strangerVideo.srcObject = e.streams[0];
-
-    // Asegurarse de que el video no intente reproducirse si ya está cargando
-    strangerVideo.onloadeddata = () => {
-      console.log('[PEER] Video cargando, reproduciendo...');
-      strangerVideo.play().catch(() => {});
-    };
+    console.log('[PEER] Track recibido!', e.track.kind, 'Total streams:', e.streams.length);
+    
+    if (e.streams && e.streams[0]) {
+      strangerVideo.srcObject = e.streams[0];
+      strangerVideo.muted = true;
+      
+      setupVideoListeners();
+      attemptVideoPlay();
+    }
   };
 
   peer.onconnectionstatechange = () => {
     console.log('[PEER] Estado de conexión:', peer.connectionState);
+    
+    switch (peer.connectionState) {
+      case 'failed':
+        console.error('[PEER] Conexión fallida');
+        handleConnectionError('failed');
+        break;
+      case 'disconnected':
+        console.warn('[PEER] Conexión perdida');
+        handleConnectionError('disconnected');
+        break;
+      case 'closed':
+        console.log('[PEER] Conexión cerrada');
+        break;
+      case 'connected':
+        console.log('[PEER] ¡Conexión establecida!');
+        if (iceTimeout) {
+          clearTimeout(iceTimeout);
+          iceTimeout = null;
+        }
+        setupVideoListeners();
+        attemptVideoPlay();
+        break;
+    }
+  };
+
+  peer.oniceconnectionstatechange = () => {
+    console.log('[PEER] Estado ICE:', peer.iceConnectionState);
+    
+    if (peer.iceConnectionState === 'failed') {
+      console.error('[PEER] ICE fallido');
+      handleConnectionError('ice-failed');
+    } else if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
+      if (iceTimeout) {
+        clearTimeout(iceTimeout);
+        iceTimeout = null;
+      }
+    }
   };
 
   peer.onnegotiationneeded = () => {
     console.log('[PEER] Negociación necesaria!');
-    if (type === 'p1' && peer) {
+    if (type === 'p1' && peer && peer.signalingState === 'stable') {
       createOffer();
     }
   };
 
   if (localStream) {
-    console.log('[PEER] Agregando tracks al peer...', localStream.getTracks().length, 'tracks');
-    localStream.getTracks().forEach(track => {
-      console.log('[PEER] Agregando track:', track.kind, track.label);
-      peer.addTrack(track, localStream);
-      
-      // Configurar calidad de video y audio
-      setTimeout(() => {
-        const sender = peer.getSenders().find(s => s.track?.kind === track.kind);
-        if (sender) {
-          const params = sender.getParameters();
-          if (!params.encodings) params.encodings = [{}];
-          
-          if (track.kind === 'video') {
-            params.encodings[0] = {
-              ...params.encodings[0],
-              maxBitrate: 2500000,
-              minBitrate: 500000,
-              scalabilityMode: 'L1T3'
-            };
-          } else if (track.kind === 'audio') {
-            params.encodings[0] = {
-              ...params.encodings[0],
-              maxBitrate: 128000,
-              priority: 'high',
-              networkPriority: 'high'
-            };
-          }
-          
-          sender.setParameters(params).catch(err => {
-            console.warn('No se pudo setear parámetros:', err);
-          });
-        }
-      }, 100);
-    });
+    addTracksToPeerGlobal();
   } else {
     console.debug('[PEER] localStream se agregará después...');
   }
   
-  // Monitorear calidad de conexión
   monitorConnectionQuality();
 }
 
 // Función para monitorear calidad de conexión WebRTC
 let statsInterval = null;
+let lastBytesReceived = 0;
+let lastCheckTime = 0;
+
 function monitorConnectionQuality() {
   if (statsInterval) clearInterval(statsInterval);
   
@@ -250,34 +482,127 @@ function monitorConnectionQuality() {
     
     try {
       const stats = await peer.getStats();
-      let videoStats = null;
-      let audioStats = null;
+      let videoOutbound = null;
+      let videoInbound = null;
+      let candidatePair = null;
       
       stats.forEach(report => {
         if (report.type === 'outbound-rtp' && report.kind === 'video') {
-          videoStats = report;
+          videoOutbound = report;
         }
-        if (report.type === 'outbound-rtp' && report.kind === 'audio') {
-          audioStats = report;
+        if (report.type === 'inbound-rtp' && report.kind === 'video') {
+          videoInbound = report;
+        }
+        if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+          candidatePair = report;
         }
       });
       
-      // Log para debugging (quitar en producción)
-      if (videoStats) {
-        console.debug('Video Stats:', {
-          bytesSent: videoStats.bytesSent,
-          packetsSent: videoStats.packetsSent,
-          packetsLost: videoStats.packetsLost,
-          bitrate: videoStats.bitrateMean,
-          frameWidth: videoStats.frameWidth,
-          frameHeight: videoStats.frameHeight,
-          framesPerSecond: videoStats.framesPerSecond
+      // Calcular bitrate recibido
+      const now = Date.now();
+      if (videoInbound && lastCheckTime > 0) {
+        const timeDiff = (now - lastCheckTime) / 1000;
+        const bytesDiff = (videoInbound.bytesReceived || 0) - lastBytesReceived;
+        const bitrateReceived = timeDiff > 0 ? Math.round((bytesDiff * 8) / timeDiff) : 0;
+        
+        console.debug('[STATS] Bitrate recibido:', (bitrateReceived / 1000).toFixed(0) + 'kbps');
+        
+        // Adaptar calidad según bitrate
+        adaptBitrate(bitrateReceived, candidatePair);
+      }
+      
+      lastBytesReceived = videoInbound?.bytesReceived || 0;
+      lastCheckTime = now;
+      
+      // Monitorear calidad de video entrante
+      if (videoInbound) {
+        const packetsLost = videoInbound.packetsLost || 0;
+        const packetsReceived = videoInbound.packetsReceived || 0;
+        const totalPackets = packetsLost + packetsReceived;
+        const lossRate = totalPackets > 0 ? (packetsLost / totalPackets * 100).toFixed(2) : 0;
+        
+        console.debug('[STATS] Video entrante:', {
+          width: videoInbound.frameWidth,
+          height: videoInbound.frameHeight,
+          fps: videoInbound.framesPerSecond,
+          packetsLost: packetsLost,
+          lossRate: lossRate + '%',
+          rtt: candidatePair?.currentRoundTripTime ? (candidatePair.currentRoundTripTime * 1000).toFixed(0) + 'ms' : 'N/A'
+        });
+        
+        // Alerta de mala calidad
+        if (parseFloat(lossRate) > 10) {
+          console.warn('[STATS] Alta pérdida de paquetes:', lossRate + '%');
+          handleConnectionError('high-packet-loss');
+        }
+      }
+      
+      // Monitorear calidad de video saliente
+      if (videoOutbound) {
+        console.debug('[STATS] Video saliente:', {
+          bytesSent: videoOutbound.bytesSent,
+          bitrate: videoOutbound.bitrateMean ? (videoOutbound.bitrateMean / 1000).toFixed(0) + 'kbps' : 'N/A',
+          frameWidth: videoOutbound.frameWidth,
+          frameHeight: videoOutbound.frameHeight,
+          framesPerSecond: videoOutbound.framesPerSecond
         });
       }
     } catch (err) {
-      console.warn('Error monitoreando stats:', err);
+      console.warn('[STATS] Error monitoreando:', err);
     }
-  }, 3000);
+  }, 5000);
+}
+
+// Adaptar bitrate dinámicamente según calidad de conexión
+let currentQualityLevel = 'high';
+let qualityCheckCount = 0;
+const QUALITY_CHECK_THRESHOLD = 3;
+
+function adaptBitrate(bitrate, candidatePair) {
+  if (!peer) return;
+  
+  const rtt = candidatePair?.currentRoundTripTime ? candidatePair.currentRoundTripTime * 1000 : 0;
+  
+  let newQualityLevel = 'high';
+  let targetBitrate = 4000000;
+  
+  // Más sensible para mejorar calidad, menos sensible para bajarla
+  if (rtt > 400 || bitrate < 300000) {
+    newQualityLevel = 'low';
+    targetBitrate = 1000000;
+    qualityCheckCount++;
+  } else if (rtt > 200 || bitrate < 800000) {
+    newQualityLevel = 'medium';
+    targetBitrate = 2500000;
+    qualityCheckCount++;
+  } else {
+    // Recuperar calidad solo si ha estado estable
+    qualityCheckCount = Math.max(0, qualityCheckCount - 1);
+    if (qualityCheckCount === 0) {
+      newQualityLevel = 'high';
+      targetBitrate = 5000000;
+    } else {
+      newQualityLevel = currentQualityLevel;
+      targetBitrate = currentQualityLevel === 'low' ? 1000000 : 2500000;
+    }
+  }
+  
+  if (newQualityLevel !== currentQualityLevel) {
+    console.log('[QUALITY] Cambiando calidad:', currentQualityLevel, '->', newQualityLevel, '| Bitrate:', targetBitrate, '| RTT:', rtt.toFixed(0), 'ms');
+    currentQualityLevel = newQualityLevel;
+    
+    const senders = peer.getSenders();
+    senders.forEach(sender => {
+      if (sender.track?.kind === 'video') {
+        const params = sender.getParameters();
+        if (params.encodings && params.encodings[0]) {
+          params.encodings[0].maxBitrate = targetBitrate;
+          params.encodings[0].minBitrate = Math.floor(targetBitrate * 0.3);
+          sender.setParameters(params).catch(() => {});
+        }
+      }
+    });
+  }
 }
 
 // Reiniciar conexión
@@ -328,26 +653,27 @@ function setupSocketEvents() {
     remoteSocket = partnerId;
     spinner.style.display = 'none';
     
-    // Crear peer connection INMEDIATAMENTE, sin esperar localStream
-    setupPeerConnection();
+    // Reiniciar contadores de retry
+    videoPlayRetries = 0;
     
-    // Iniciar cámara primero, luego agregar tracks
+    // Asegurar que tenemos media primero
     initMedia().then(() => {
-      if (peer) {
-        addTracksToPeer();
-        
-        // Si tenemos un SDP pendiente, procesarlo ahora que tenemos tracks
-        if (pendingSdp) {
-          console.log('[WEBRTC] Procesando SDP pendiente con tracks listos...');
-          processPendingMessages();
-        }
-        
-        if (type === 'p1') {
-          console.log('[WEBRTC] Soy p1, creando offer...');
-          createOffer();
-        }
+      // Crear peer connection con media lista
+      setupPeerConnection();
+      
+      if (type === 'p1') {
+        console.log('[WEBRTC] Soy p1, creando offer...');
+        // Pequeño delay para asegurar que el peer está listo
+        setTimeout(() => {
+          if (peer && peer.signalingState === 'stable') {
+            createOffer();
+          }
+        }, 300);
       }
-    }).catch(() => {
+    }).catch((err) => {
+      console.error('[SOCKET] Error initMedia:', err);
+      // Continuar aunque falle initMedia
+      setupPeerConnection();
       if (type === 'p1') {
         createOffer();
       }
@@ -356,6 +682,9 @@ function setupSocketEvents() {
 
   function addTracksToPeer() {
     if (!localStream || !peer) return;
+    
+    const videoTrack = localStream.getVideoTracks()[0];
+    const audioTrack = localStream.getAudioTracks()[0];
     
     localStream.getTracks().forEach(track => {
       const existingSender = peer.getSenders().find(s => s.track?.kind === track.kind);
@@ -367,8 +696,56 @@ function setupSocketEvents() {
     
     console.log('[PEER] Total senders:', peer.getSenders().length);
     
+    // Configurar calidad de video mejorada después de agregar tracks
+    setTimeout(() => {
+      configureTrackQuality(videoTrack, audioTrack);
+    }, 200);
+    
     // Procesar mensajes pendientes (SDP e ICE)
     processPendingMessages();
+  }
+  
+  // Configurar calidad óptima de tracks
+  function configureTrackQuality(videoTrack, audioTrack) {
+    if (!peer) return;
+    
+    const senders = peer.getSenders();
+    
+    senders.forEach(sender => {
+      if (!sender.track) return;
+      
+      const params = sender.getParameters();
+      if (!params.encodings) params.encodings = [{}];
+      
+      if (sender.track.kind === 'video') {
+        // Mayor bitrate para mejor calidad
+        const isHD = preferredVideoConstraints?.width?.ideal >= 1920;
+        const maxBitrate = isHD ? 6000000 : 4000000;
+        const minBitrate = isHD ? 1500000 : 800000;
+        
+        params.encodings[0] = {
+          ...params.encodings[0],
+          maxBitrate: maxBitrate,
+          minBitrate: minBitrate,
+          scalabilityMode: 'L1T3',
+          networkPriority: 'high'
+        };
+        
+        console.log('[PEER] Configurando video:', { maxBitrate, minBitrate, isHD });
+        
+      } else if (sender.track.kind === 'audio') {
+        params.encodings[0] = {
+          ...params.encodings[0],
+          maxBitrate: 128000,
+          priority: 'high',
+          networkPriority: 'high'
+        };
+      }
+      
+      sender.setParameters(params).catch(err => {
+        console.warn('[PEER] Error configurando calidad:', err);
+      });
+    });
   }
   
   function processPendingMessages() {
@@ -405,63 +782,90 @@ function setupSocketEvents() {
 
 // WebRTC
     socket.on('sdp:reply', async ({ sdp }) => {
-      console.log('[SDP] Recibido SDP reply:', sdp.type, '| Mi tipo:', type, '| Tracks listos:', localStream?.getTracks().length);
+      console.log('[SDP] Recibido SDP reply:', sdp.type, '| Mi tipo:', type, '| Peer existe:', !!peer);
       
-      // Guardar SDP pendiente - se procesará cuando los tracks estén listos
-      if (!peer || !localStream) {
+      if (!peer) {
         console.log('[SDP] Guardando SDP para después...');
         pendingSdp = sdp;
         return;
       }
+      
       handleSdp(sdp);
     });
 
     function handleSdp(sdp) {
       if (!peer) return;
       
+      // Verificar estado de señalización
+      if (peer.signalingState === 'have-local-offer' && sdp.type === 'answer') {
+        console.log('[SDP] Procesando answer...');
+      } else if (sdp.type === 'offer') {
+        console.log('[SDP] Procesando offer...');
+      }
+      
       try {
-        peer.setRemoteDescription(new RTCSessionDescription(sdp)).then(() => {
-          console.log('[SDP] Remote description configurada');
-          if (type === 'p2') {
-            console.log('[SDP] Soy p2, creando answer...');
-            peer.createAnswer().then(answer => {
+        peer.setRemoteDescription(new RTCSessionDescription(sdp))
+          .then(() => {
+            console.log('[SDP] Remote description configurada, signalingState:', peer.signalingState);
+            
+            if (type === 'p2' && sdp.type === 'offer') {
+              console.log('[SDP] Soy p2, creando answer...');
+              return peer.createAnswer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true
+              });
+            }
+            return null;
+          })
+          .then(answer => {
+            if (answer) {
               return peer.setLocalDescription(answer);
-            }).then(() => {
+            }
+            return null;
+          })
+          .then(() => {
+            if (type === 'p2' && peer.localDescription) {
+              console.log('[SDP] Enviando answer...');
               socket.emit('sdp:send', { sdp: peer.localDescription });
-              console.log('[SDP] Answer enviada!');
-            });
-          } else if (type === 'p1') {
-            console.log('[SDP] Soy p1, respuesta recibida');
-          }
-        });
+            } else if (type === 'p1' && sdp.type === 'answer') {
+              console.log('[SDP] Soy p1, respuesta recibida y completada');
+            }
+          })
+          .catch(err => {
+            console.error('[SDP] Error en proceso SDP:', err);
+          });
       } catch (err) {
-        console.error('[SDP] Error handling SDP reply:', err);
+        console.error('[SDP] Error handling SDP:', err);
       }
     }
 
     socket.on('ice:reply', async ({ candidate }) => {
       console.log('[ICE] Recibido ICE candidate');
+      handleIce(candidate);
+    });
+
+    function handleIce(candidate) {
       if (!peer) {
         console.log('[ICE] Peer no existe, guardando para después');
         pendingIceCandidates.push(candidate);
         return;
       }
-      handleIce(candidate);
-    });
-
-    function handleIce(candidate) {
-      if (!peer) return;
       
       // Solo procesar ICE si tenemos remote description
-      if (!peer.remoteDescription) {
-        console.log('[ICE] No hay remote description, guardando...');
+      if (!peer.remoteDescription || peer.remoteDescription.type === '') {
+        console.log('[ICE] No hay remote description completa, guardando...');
         pendingIceCandidates.push(candidate);
         return;
       }
       
       try {
-        peer.addIceCandidate(new RTCIceCandidate(candidate));
-        console.log('[ICE] ICE candidate añadido');
+        peer.addIceCandidate(new RTCIceCandidate(candidate))
+          .then(() => {
+            console.log('[ICE] ICE candidate añadido correctamente');
+          })
+          .catch(err => {
+            console.error('[ICE] Error añadiendo candidate:', err);
+          });
       } catch (err) {
         console.error('[ICE] Error handling ICE candidate:', err);
       }
@@ -488,6 +892,247 @@ function setupSocketEvents() {
       alert('Debe haber dos personas en la sala para proceder.');
     }
   });
+
+  function addTracksToPeer() {
+    if (!localStream || !peer) return;
+    
+    const videoTrack = localStream.getVideoTracks()[0];
+    const audioTrack = localStream.getAudioTracks()[0];
+    
+    localStream.getTracks().forEach(track => {
+      const existingSender = peer.getSenders().find(s => s.track?.kind === track.kind);
+      if (!existingSender) {
+        console.log('[PEER] Agregando track:', track.kind);
+        peer.addTrack(track, localStream);
+      }
+    });
+    
+    console.log('[PEER] Total senders:', peer.getSenders().length);
+    
+    setTimeout(() => {
+      configureTrackQuality(videoTrack, audioTrack);
+    }, 200);
+    
+    processPendingMessages();
+  }
+  
+  function configureTrackQuality(videoTrack, audioTrack) {
+    if (!peer) return;
+    
+    const senders = peer.getSenders();
+    
+    senders.forEach(sender => {
+      if (!sender.track) return;
+      
+      const params = sender.getParameters();
+      if (!params.encodings) params.encodings = [{}];
+      
+      if (sender.track.kind === 'video') {
+        const isHD = preferredVideoConstraints?.width?.ideal >= 1920;
+        const maxBitrate = isHD ? 6000000 : 4000000;
+        const minBitrate = isHD ? 1500000 : 800000;
+        
+        params.encodings[0] = {
+          ...params.encodings[0],
+          maxBitrate: maxBitrate,
+          minBitrate: minBitrate,
+          scalabilityMode: 'L1T3',
+          networkPriority: 'high'
+        };
+        
+        console.log('[PEER] Configurando video:', { maxBitrate, minBitrate, isHD });
+        
+      } else if (sender.track.kind === 'audio') {
+        params.encodings[0] = {
+          ...params.encodings[0],
+          maxBitrate: 128000,
+          priority: 'high',
+          networkPriority: 'high'
+        };
+      }
+      
+      sender.setParameters(params).catch(err => {
+        console.warn('[PEER] Error configurando calidad:', err);
+      });
+    });
+  }
+  
+  function processPendingMessages() {
+    if (!peer) return;
+    
+    if (pendingIceCandidates.length > 0) {
+      pendingIceCandidates.forEach(candidate => {
+        console.log('[ICE] Procesando ICE pendiente...');
+        handleIce(candidate);
+      });
+      pendingIceCandidates = [];
+    }
+    
+    if (pendingSdp) {
+      console.log('[SDP] Procesando SDP pendiente...');
+      handleSdp(pendingSdp);
+      pendingSdp = null;
+    }
+  }
+}
+
+// Funciones globales para WebRTC
+function addTracksToPeerGlobal() {
+  if (!localStream || !peer) return;
+  
+  const videoTrack = localStream.getVideoTracks()[0];
+  const audioTrack = localStream.getAudioTracks()[0];
+  
+  localStream.getTracks().forEach(track => {
+    const existingSender = peer.getSenders().find(s => s.track?.kind === track.kind);
+    if (!existingSender) {
+      console.log('[PEER] Agregando track:', track.kind);
+      peer.addTrack(track, localStream);
+    }
+  });
+  
+  console.log('[PEER] Total senders:', peer.getSenders().length);
+  
+  setTimeout(() => {
+    configureTrackQualityGlobal(videoTrack, audioTrack);
+  }, 200);
+  
+  processPendingMessagesGlobal();
+}
+
+function configureTrackQualityGlobal(videoTrack, audioTrack) {
+  if (!peer) return;
+  
+  const senders = peer.getSenders();
+  
+  senders.forEach(sender => {
+    if (!sender.track) return;
+    
+    const params = sender.getParameters();
+    if (!params.encodings) params.encodings = [{}];
+    
+    if (sender.track.kind === 'video') {
+      const isHD = preferredVideoConstraints?.width?.ideal >= 1920;
+      const maxBitrate = isHD ? 6000000 : 4000000;
+      const minBitrate = isHD ? 1500000 : 800000;
+      
+      params.encodings[0] = {
+        ...params.encodings[0],
+        maxBitrate: maxBitrate,
+        minBitrate: minBitrate,
+        scalabilityMode: 'L1T3',
+        networkPriority: 'high'
+      };
+      
+      console.log('[PEER] Configurando video:', { maxBitrate, minBitrate, isHD });
+      
+    } else if (sender.track.kind === 'audio') {
+      params.encodings[0] = {
+        ...params.encodings[0],
+        maxBitrate: 128000,
+        priority: 'high',
+        networkPriority: 'high'
+      };
+    }
+    
+    sender.setParameters(params).catch(err => {
+      console.warn('[PEER] Error configurando calidad:', err);
+    });
+  });
+}
+
+function processPendingMessagesGlobal() {
+  if (!peer) return;
+  
+  if (pendingIceCandidates.length > 0) {
+    pendingIceCandidates.forEach(candidate => {
+      console.log('[ICE] Procesando ICE pendiente...');
+      handleIceGlobal(candidate);
+    });
+    pendingIceCandidates = [];
+  }
+  
+  if (pendingSdp) {
+    console.log('[SDP] Procesando SDP pendiente...');
+    handleSdpGlobal(pendingSdp);
+    pendingSdp = null;
+  }
+}
+
+// Handlers globales para mensajes pendientes
+function handleIceGlobal(candidate) {
+  if (!peer) {
+    pendingIceCandidates.push(candidate);
+    return;
+  }
+  
+  if (!peer.remoteDescription || !peer.remoteDescription.type) {
+    pendingIceCandidates.push(candidate);
+    return;
+  }
+  
+  try {
+    peer.addIceCandidate(new RTCIceCandidate(candidate))
+      .then(() => {
+        console.log('[ICE] ICE candidate añadido correctamente');
+      })
+      .catch(err => {
+        console.error('[ICE] Error añadiendo candidate:', err);
+      });
+  } catch (err) {
+    console.error('[ICE] Error handling ICE candidate:', err);
+  }
+}
+
+function handleSdpGlobal(sdp) {
+  if (!peer) return;
+  
+  // Si ya está en stable y recebimos answer, ignoramos (ICE ya conectó)
+  if (peer.signalingState === 'stable' && sdp.type === 'answer') {
+    console.log('[SDP] Ya en stable, ignorando answer duplicado');
+    return;
+  }
+  
+  if (peer.signalingState === 'have-local-offer' && sdp.type === 'answer') {
+    console.log('[SDP] Procesando answer...');
+  } else if (sdp.type === 'offer') {
+    console.log('[SDP] Procesando offer...');
+  }
+  
+  try {
+    peer.setRemoteDescription(new RTCSessionDescription(sdp))
+      .then(() => {
+        console.log('[SDP] Remote description configurada, signalingState:', peer.signalingState);
+        
+        if (type === 'p2' && sdp.type === 'offer') {
+          console.log('[SDP] Soy p2, creando answer...');
+          return peer.createAnswer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: true
+          });
+        }
+        return null;
+      })
+      .then(answer => {
+        if (answer) {
+          return peer.setLocalDescription(answer);
+        }
+        return null;
+      })
+      .then(() => {
+        if (type === 'p2' && peer.localDescription) {
+          console.log('[SDP] Enviando answer...');
+          socket.emit('sdp:send', { sdp: peer.localDescription });
+        } else if (type === 'p1' && sdp.type === 'answer') {
+          console.log('[SDP] Soy p1, respuesta recibida y completada');
+        }
+      })
+      .catch(err => {
+        console.error('[SDP] Error en proceso SDP:', err);
+      });
+  } catch (err) {
+    console.error('[SDP] Error handling SDP:', err);
+  }
 }
 
 // Eventos de interfaz
@@ -610,6 +1255,19 @@ async function createOffer() {
     console.log('[OFFER] Enviando SDP al partner...');
     socket.emit('sdp:send', { sdp: peer.localDescription });
     console.log('[OFFER] SDP enviado!');
+    
+    // Iniciar timeout de ICE después de enviar oferta
+    setTimeout(() => {
+      if (peer && peer.iceConnectionState !== 'connected' && peer.iceConnectionState !== 'completed') {
+        console.log('[PEER] Iniciando timeout de ICE...');
+        iceTimeout = setTimeout(() => {
+          if (peer && peer.iceConnectionState !== 'connected' && peer.iceConnectionState !== 'completed') {
+            console.warn('[PEER] Timeout de conexión ICE, estado:', peer.iceConnectionState);
+            handleConnectionError('ice-timeout');
+          }
+        }, ICE_CONNECTION_TIMEOUT);
+      }
+    }, 2000);
   } catch (err) {
     console.error('[OFFER] Error creando offer:', err);
   }
