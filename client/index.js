@@ -3,6 +3,7 @@
 // ============================================
 
 import { io } from 'socket.io-client';
+import { getMediaStreamWithFallback, enableVideoTracks, enableAudioTracks, stopMediaStream, getStreamTracks } from './src/webrtc/media.js';
 
 // ============================================
 // FSM - Finite State Machine
@@ -21,41 +22,28 @@ const AppState = {
 // ESTADO CENTRALIZADO
 // ============================================
 const STATE = {
-  // Core state
   appState: AppState.IDLE,
-  
-  // Connection
   peer: null,
   localStream: null,
   remoteSocket: null,
   type: null,
   roomid: null,
   socket: null,
-  
-  // Media state
   isCameraOff: false,
   isMuted: false,
-  
-  // Flow control
   isExiting: false,
   isNegotiating: false,
   isReconnecting: false,
-  
-  // Pending messages
   pendingSdp: null,
   pendingIceCandidates: [],
-  
-  // Retry system
   retryCount: 0,
-  
-  // Media
   videoPlayRetries: 0,
   preferredVideoConstraints: null,
   currentQualityLevel: 'high'
 };
 
 // ============================================
-// TIMERS MANAGER (evita memory leaks)
+// TIMERS MANAGER
 // ============================================
 const timers = new Map();
 
@@ -105,17 +93,12 @@ const DOM = {
   nextBtn: document.getElementById('nextBtn'),
   exitBtn: document.getElementById('exitBtn'),
   spinner: document.querySelector('.modal'),
-  cameraBtn: document.getElementById('cameraBtn'),
-  statusIndicator: null
+  cameraBtn: document.getElementById('cameraBtn')
 };
 
 // ============================================
 // HELPERS
 // ============================================
-function isMobile() {
-  return /Mobi|Android/i.test(navigator.userAgent);
-}
-
 function sanitize(text) {
   return text.replace(/[<>]/g, '');
 }
@@ -125,59 +108,32 @@ function log(type, msg, data = null) {
 }
 
 // ============================================
-// FSM - State Management
+// FSM
 // ============================================
 function setAppState(newState) {
   const oldState = STATE.appState;
   STATE.appState = newState;
   log('FSM', `${oldState} → ${newState}`);
-  
-  // Update UI status indicator
-  updateStatusIndicator(newState);
 }
 
 function canPerformAction(action) {
   const current = STATE.appState;
   
-  // Always allowed actions
   if (action === 'cleanup' || action === 'exit') return true;
   
-  // Block conflicting actions during certain states
   if (current === AppState.NEGOTIATING && (action === 'match' || action === 'offer')) {
-    log('FSM', `Blocked: ${action} during ${current}`);
     return false;
   }
   
   if (current === AppState.RECONNECTING && (action === 'match' || action === 'offer')) {
-    log('FSM', `Blocked: ${action} during ${current}`);
     return false;
   }
   
   return true;
 }
 
-function updateStatusIndicator(state) {
-  if (!DOM.statusIndicator) return;
-  
-  const statusMap = {
-    [AppState.IDLE]: { text: 'Idle', color: '#666' },
-    [AppState.CONNECTING]: { text: 'Connecting...', color: '#ff9800' },
-    [AppState.MATCHED]: { text: 'Matched!', color: '#4caf50' },
-    [AppState.NEGOTIATING]: { text: 'Negotiating...', color: '#2196f3' },
-    [AppState.CONNECTED]: { text: 'Connected', color: '#4caf50' },
-    [AppState.RECONNECTING]: { text: 'Reconnecting...', color: '#ff9800' },
-    [AppState.DISCONNECTED]: { text: 'Disconnected', color: '#f44336' }
-  };
-  
-  const status = statusMap[state];
-  if (status) {
-    DOM.statusIndicator.textContent = status.text;
-    DOM.statusIndicator.style.color = status.color;
-  }
-}
-
 // ============================================
-// ERROR HANDLING CENTRALIZADO
+// ERROR HANDLING
 // ============================================
 function safeAsync(fn, context) {
   return (...args) => {
@@ -206,7 +162,6 @@ function handleError(type, error) {
 // EXPONENTIAL BACKOFF
 // ============================================
 function getBackoffDelay(retryCount) {
-  // delay = min(1000 * 2^retryCount, 10000)
   return Math.min(1000 * Math.pow(2, retryCount), 10000);
 }
 
@@ -234,55 +189,30 @@ function scheduleReconnect() {
 // ============================================
 async function initMedia() {
   try {
-    // Reset camera state to ON
+    // Reset camera state
     STATE.isCameraOff = false;
     if (DOM.cameraBtn) {
       DOM.cameraBtn.querySelector('.glitch-text').textContent = 'OFF';
     }
     
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const videoDevices = devices.filter(d => d.kind === 'videoinput');
-    
-    const videoConstraints = videoDevices.length > 0 ? {
-      deviceId: { exact: videoDevices[0].deviceId },
-      width: { ideal: 1920, min: 1280 },
-      height: { ideal: 1080, min: 720 },
-      frameRate: { ideal: 30, min: 24 },
-      facingMode: "user"
-    } : {
-      width: { ideal: 1920, min: 1280 },
-      height: { ideal: 1080, min: 720 },
-      frameRate: { ideal: 30, min: 24 },
-      facingMode: "user"
-    };
-    
-    STATE.localStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: { ideal: true },
-        noiseSuppression: { ideal: true },
-        autoGainControl: { ideal: true }
-      },
-      video: videoConstraints
+    // Use fallback-aware media initialization
+    STATE.localStream = await getMediaStreamWithFallback((err) => {
+      log('MEDIA', 'Fallback triggered', err.name);
     });
     
-    // Ensure all video and audio tracks are ENABLED
-    STATE.localStream.getVideoTracks().forEach(track => {
-      track.enabled = true;
-    });
-    STATE.localStream.getAudioTracks().forEach(track => {
-      track.enabled = true;
-    });
+    // Ensure all tracks are enabled
+    enableVideoTracks(STATE.localStream);
+    enableAudioTracks(STATE.localStream);
     
     DOM.myVideo.srcObject = STATE.localStream;
     DOM.myVideo.muted = true;
-    STATE.preferredVideoConstraints = videoConstraints;
     
-    log('MEDIA', 'Stream initialized - Camera ON', { 
-      width: videoConstraints.width.ideal, 
-      height: videoConstraints.height.ideal,
-      videoTracks: STATE.localStream.getVideoTracks().length,
-      audioTracks: STATE.localStream.getAudioTracks().length
+    const tracks = getStreamTracks(STATE.localStream);
+    log('MEDIA', 'Stream initialized - Camera ON', {
+      videoTracks: tracks.video.length,
+      audioTracks: tracks.audio.length
     });
+    
   } catch (err) {
     log('MEDIA', 'Error initializing media', err);
     throw err;
@@ -302,12 +232,11 @@ function setupVideoListeners() {
   DOM.strangerVideo.onstalled = () => attemptPlay();
   DOM.strangerVideo.onerror = () => attemptPlay();
   
-  // Pause video when tab is hidden
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      log('VIDEO', 'Tab hidden - pausing');
+      log('VIDEO', 'Tab hidden');
     } else {
-      log('VIDEO', 'Tab visible - resuming');
+      log('VIDEO', 'Tab visible');
       attemptPlay();
     }
   });
@@ -348,7 +277,10 @@ const ICE_SERVERS = [
 ];
 
 function createPeerConnection() {
-  if (!canPerformAction('peer')) return;
+  if (!canPerformAction('peer')) {
+    log('PEER', 'Cannot create - action blocked by FSM');
+    return;
+  }
   
   STATE.peer = new RTCPeerConnection({
     iceServers: ICE_SERVERS,
@@ -357,14 +289,12 @@ function createPeerConnection() {
     rtcpMuxPolicy: 'require'
   });
   
-  // ICE Candidate Handler
   STATE.peer.onicecandidate = (e) => {
     if (e.candidate && STATE.remoteSocket) {
       STATE.socket.emit('ice:send', { candidate: e.candidate });
     }
   };
   
-  // Track Handler
   STATE.peer.ontrack = (e) => {
     log('PEER', `Track received: ${e.track.kind}`);
     DOM.strangerVideo.srcObject = e.streams[0];
@@ -372,7 +302,6 @@ function createPeerConnection() {
     attemptPlay();
   };
   
-  // Connection State Handler
   STATE.peer.onconnectionstatechange = () => {
     const state = STATE.peer?.connectionState;
     log('PEER', `Connection state: ${state}`);
@@ -387,7 +316,6 @@ function createPeerConnection() {
     }
   };
   
-  // ICE Connection State Handler
   STATE.peer.oniceconnectionstatechange = () => {
     const state = STATE.peer?.iceConnectionState;
     log('PEER', `ICE state: ${state}`);
@@ -397,14 +325,16 @@ function createPeerConnection() {
     }
   };
   
+  STATE.peer.onnegotiationneeded = () => {
+    if (STATE.type === 'p1' && STATE.peer.signalingState === 'stable') {
+      createOffer();
+    }
+  };
+  
   // Add tracks if stream exists
   if (STATE.localStream) {
-    STATE.localStream.getVideoTracks().forEach(track => {
-      track.enabled = true;
-    });
-    STATE.localStream.getAudioTracks().forEach(track => {
-      track.enabled = true;
-    });
+    enableVideoTracks(STATE.localStream);
+    enableAudioTracks(STATE.localStream);
     
     STATE.localStream.getTracks().forEach(track => {
       STATE.peer.addTrack(track, STATE.localStream);
@@ -412,7 +342,6 @@ function createPeerConnection() {
     configureBitrate();
   }
   
-  // Start ICE timeout
   setTimer('iceTimeout', () => {
     if (STATE.peer?.iceConnectionState !== 'connected') {
       handleError('ICE_TIMEOUT', 'No connection after 30s');
@@ -425,10 +354,6 @@ function createPeerConnection() {
 function configureBitrate() {
   if (!STATE.peer) return;
   
-  const isHD = STATE.preferredVideoConstraints?.width?.ideal >= 1920;
-  const maxBitrate = isHD ? 6000000 : 4000000;
-  const minBitrate = isHD ? 1500000 : 800000;
-  
   STATE.peer.getSenders().forEach(sender => {
     if (!sender.track) return;
     
@@ -438,8 +363,8 @@ function configureBitrate() {
     if (sender.track.kind === 'video') {
       params.encodings[0] = {
         ...params.encodings[0],
-        maxBitrate,
-        minBitrate,
+        maxBitrate: 4000000,
+        minBitrate: 1000000,
         scalabilityMode: 'L1T3',
         networkPriority: 'high',
         degradationPreference: 'maintain-framerate'
@@ -454,12 +379,10 @@ function configureBitrate() {
     
     sender.setParameters(params).catch(() => {});
   });
-  
-  log('PEER', 'Bitrate configured', { maxBitrate, minBitrate, isHD });
 }
 
 // ============================================
-// SDP HANDLING
+// SDP
 // ============================================
 async function createOffer() {
   if (!STATE.peer || !canPerformAction('offer')) {
@@ -467,7 +390,6 @@ async function createOffer() {
     return;
   }
   
-  // Prevent race condition - only one offer at a time
   if (STATE.isNegotiating) {
     log('SDP', 'Already negotiating, skipping');
     return;
@@ -495,7 +417,6 @@ async function createOffer() {
 async function handleSdp(sdp) {
   if (!STATE.peer) return;
   
-  // Ignore duplicate answers
   if (STATE.peer.signalingState === 'stable' && sdp.type === 'answer') {
     return;
   }
@@ -517,7 +438,7 @@ async function handleSdp(sdp) {
 }
 
 // ============================================
-// ICE HANDLING
+// ICE
 // ============================================
 async function handleIce(candidate) {
   if (!STATE.peer) {
@@ -552,7 +473,7 @@ function processPendingMessages() {
 }
 
 // ============================================
-// QUALITY ADAPTATION
+// QUALITY
 // ============================================
 function adaptBitrate(bitrate, rtt) {
   if (!STATE.peer) return;
@@ -581,7 +502,7 @@ function adaptBitrate(bitrate, rtt) {
 }
 
 // ============================================
-// STATS MONITORING
+// STATS
 // ============================================
 let statsInterval = null;
 let lastBytes = 0;
@@ -619,14 +540,6 @@ function startStatsMonitoring() {
         : 0;
       
       adaptBitrate(bitrate, rtt);
-      
-      const lost = videoInbound.packetsLost || 0;
-      const total = (videoInbound.packetsReceived || 0) + lost;
-      const lossRate = total > 0 ? (lost / total) * 100 : 0;
-      
-      if (lossRate > 10) {
-        log('STATS', 'High packet loss', { lossRate: lossRate.toFixed(2) });
-      }
     }
     
     lastBytes = videoInbound.bytesReceived || 0;
@@ -659,7 +572,7 @@ function fullCleanup() {
   }
   
   if (STATE.localStream) {
-    STATE.localStream.getTracks().forEach(t => t.stop());
+    stopMediaStream(STATE.localStream);
     STATE.localStream = null;
   }
   
@@ -672,7 +585,7 @@ function fullCleanup() {
 }
 
 // ============================================
-// RESTART CONNECTION
+// RESTART
 // ============================================
 function restartConnection() {
   STATE.remoteSocket = null;
@@ -696,7 +609,7 @@ function restartConnection() {
 }
 
 // ============================================
-// SOCKET EVENTS
+// SOCKET
 // ============================================
 function setupSocketEvents() {
   STATE.socket.on('connect', () => {
@@ -721,10 +634,10 @@ function setupSocketEvents() {
     DOM.spinner.style.display = 'none';
     setAppState(AppState.MATCHED);
     
-    // Create peer connection FIRST
+    // Create peer first
     createPeerConnection();
     
-    // Then init media
+    // Then try to init media (with fallback)
     safeAsync(async () => {
       await initMedia();
       
@@ -763,7 +676,6 @@ function setupSocketEvents() {
     handleIce(candidate);
   });
   
-  // Chat
   STATE.socket.on('get-message', (message) => {
     DOM.chatWrapper.innerHTML += `<div class="msg"><b>Stranger: </b> <span>${sanitize(message)}</span></div>`;
     DOM.chatWrapper.scrollTop = DOM.chatWrapper.scrollHeight;
@@ -775,7 +687,7 @@ function setupSocketEvents() {
 }
 
 // ============================================
-// UI CONTROLS
+// UI
 // ============================================
 function setupUIEvents() {
   DOM.exitBtn.addEventListener('click', () => {
@@ -792,21 +704,20 @@ function setupUIEvents() {
     restartConnection();
   });
   
-  // Camera toggle
   DOM.cameraBtn.addEventListener('click', () => {
     if (!STATE.localStream) {
       showNotification('No camera available');
       return;
     }
     
-    const videoTracks = STATE.localStream.getVideoTracks();
-    if (videoTracks.length === 0) {
+    const { video } = getStreamTracks(STATE.localStream);
+    if (video.length === 0) {
       showNotification('No video track');
       return;
     }
     
     STATE.isCameraOff = !STATE.isCameraOff;
-    videoTracks.forEach(track => {
+    video.forEach(track => {
       track.enabled = !STATE.isCameraOff;
     });
     
@@ -814,7 +725,6 @@ function setupUIEvents() {
     showNotification(STATE.isCameraOff ? 'Video OFF' : 'Video ON');
   });
   
-  // Mute toggle
   const muteBtn = document.getElementById('muteBtn');
   if (muteBtn) {
     muteBtn.addEventListener('click', () => {
@@ -823,14 +733,14 @@ function setupUIEvents() {
         return;
       }
       
-      const audioTracks = STATE.localStream.getAudioTracks();
-      if (audioTracks.length === 0) {
+      const { audio } = getStreamTracks(STATE.localStream);
+      if (audio.length === 0) {
         showNotification('No audio track');
         return;
       }
       
       STATE.isMuted = !STATE.isMuted;
-      audioTracks.forEach(track => {
+      audio.forEach(track => {
         track.enabled = !STATE.isMuted;
       });
       
@@ -839,7 +749,6 @@ function setupUIEvents() {
     });
   }
   
-  // Chat
   const sendMessage = () => {
     const message = DOM.inputField.value.trim();
     if (message && STATE.roomid) {
@@ -858,9 +767,6 @@ function setupUIEvents() {
   });
 }
 
-// ============================================
-// NOTIFICATIONS
-// ============================================
 function showNotification(message) {
   const notification = document.createElement('div');
   notification.className = 'notification';

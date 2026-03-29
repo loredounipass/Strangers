@@ -1,4 +1,4 @@
-// Media Module
+// Media Module - Production Ready
 
 export async function getNativeVideoConstraints() {
   try {
@@ -7,8 +7,8 @@ export async function getNativeVideoConstraints() {
     
     if (videoDevices.length === 0) {
       return {
-        width: { ideal: 1920, min: 1280 },
-        height: { ideal: 1080, min: 720 },
+        width: { ideal: 1280, min: 640 },
+        height: { ideal: 720, min: 480 },
         frameRate: { ideal: 30, min: 24 },
         facingMode: "user"
       };
@@ -17,10 +17,11 @@ export async function getNativeVideoConstraints() {
     const deviceId = videoDevices[0].deviceId;
     const capabilities = navigator.mediaDevices.getSupportedConstraints();
     
+    // Start with more conservative constraints
     const constraints = {
       deviceId: deviceId ? { exact: deviceId } : undefined,
-      width: { ideal: 1920, max: 1920, min: 1280 },
-      height: { ideal: 1080, max: 1080, min: 720 },
+      width: { ideal: 1280, max: 1280, min: 640 },
+      height: { ideal: 720, max: 720, min: 480 },
       frameRate: { ideal: 30, min: 24 },
       facingMode: "user"
     };
@@ -32,29 +33,78 @@ export async function getNativeVideoConstraints() {
     return constraints;
   } catch (err) {
     console.warn('[MEDIA] Error getting native constraints:', err);
-    return {
-      width: { ideal: 1920, min: 1280 },
-      height: { ideal: 1080, min: 720 },
-      frameRate: { ideal: 30, min: 24 },
-      facingMode: "user"
-    };
+    return getFallbackVideoConstraints();
   }
+}
+
+export function getFallbackVideoConstraints() {
+  return {
+    width: { ideal: 1280, min: 640 },
+    height: { ideal: 720, min: 480 },
+    frameRate: { ideal: 30, min: 24 },
+    facingMode: "user"
+  };
+}
+
+export function getMinimalVideoConstraints() {
+  return {
+    width: { ideal: 640, min: 320 },
+    height: { ideal: 480, min: 240 },
+    frameRate: { ideal: 24, min: 15 },
+    facingMode: "user"
+  };
 }
 
 export async function getMediaStream(videoConstraints, audioConstraints = {}) {
   const defaultAudio = {
     echoCancellation: { ideal: true },
     noiseSuppression: { ideal: true },
-    autoGainControl: { ideal: true },
-    sampleRate: { ideal: 48000 },
-    channelCount: { ideal: 1 },
-    latency: { ideal: 0.01 }
+    autoGainControl: { ideal: true }
   };
   
   return navigator.mediaDevices.getUserMedia({
     audio: { ...defaultAudio, ...audioConstraints },
     video: videoConstraints
   });
+}
+
+export async function getMediaStreamWithFallback(onFallback) {
+  // Try with high quality first
+  const highConstraints = await getNativeVideoConstraints();
+  
+  try {
+    return await getMediaStream(highConstraints);
+  } catch (err) {
+    console.warn('[MEDIA] High quality failed, trying fallback:', err.name);
+    
+    // Try with fallback constraints
+    const fallbackConstraints = getFallbackVideoConstraints();
+    
+    try {
+      return await getMediaStream(fallbackConstraints);
+    } catch (fallbackErr) {
+      console.warn('[MEDIA] Fallback failed, trying minimal:', fallbackErr.name);
+      
+      // Try with minimal constraints
+      const minimalConstraints = getMinimalVideoConstraints();
+      
+      try {
+        return await getMediaStream(minimalConstraints);
+      } catch (minimalErr) {
+        console.error('[MEDIA] All video constraints failed:', minimalErr.name);
+        
+        // Try audio only
+        if (onFallback) onFallback(minimalErr);
+        
+        try {
+          return await getAudioOnlyStream();
+        } catch (audioErr) {
+          console.error('[MEDIA] Even audio failed:', audioErr.name);
+          throw audioErr;
+        }
+      }
+    }
+  }
 }
 
 export async function getAudioOnlyStream() {
@@ -74,7 +124,7 @@ export function stopMediaStream(stream) {
   }
 }
 
-export function applyVideoSettings(videoTrack, settings = {}) {
+export async function applyVideoSettings(videoTrack, settings = {}) {
   if (!videoTrack) return;
   
   const defaultSettings = {
@@ -83,24 +133,53 @@ export function applyVideoSettings(videoTrack, settings = {}) {
     ]
   };
   
-  return videoTrack.applyConstraints({
-    ...defaultSettings,
-    ...settings
-  });
+  try {
+    await videoTrack.applyConstraints({
+      ...defaultSettings,
+      ...settings
+    });
+  } catch (err) {
+    console.warn('[MEDIA] Error applying video settings:', err);
+  }
 }
 
-export function toggleVideoTrack(stream, enabled) {
+export function enableVideoTracks(stream) {
   if (stream) {
     stream.getVideoTracks().forEach(track => {
-      track.enabled = enabled;
+      track.enabled = true;
     });
   }
 }
 
-export function toggleAudioTrack(stream, enabled) {
+export function disableVideoTracks(stream) {
   if (stream) {
-    stream.getAudioTracks().forEach(track => {
-      track.enabled = enabled;
+    stream.getVideoTracks().forEach(track => {
+      track.enabled = false;
     });
   }
+}
+
+export function enableAudioTracks(stream) {
+  if (stream) {
+    stream.getAudioTracks().forEach(track => {
+      track.enabled = true;
+    });
+  }
+}
+
+export function disableAudioTracks(stream) {
+  if (stream) {
+    stream.getAudioTracks().forEach(track => {
+      track.enabled = false;
+    });
+  }
+}
+
+export function getStreamTracks(stream) {
+  if (!stream) return { video: [], audio: [] };
+  
+  return {
+    video: stream.getVideoTracks(),
+    audio: stream.getAudioTracks()
+  };
 }
