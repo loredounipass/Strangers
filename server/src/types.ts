@@ -3,10 +3,13 @@ export interface room {
   isAvailable: boolean,
   p1: {
     id: string | null,
+    clientId?: string | null
   },
   p2: {
     id: string | null,
-  }
+    clientId?: string | null
+  },
+  lastSeen?: number
 }
 
 export type GetTypesResult = 

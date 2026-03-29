@@ -42,6 +42,18 @@ const STATE = {
   currentQualityLevel: 'high'
 };
 
+// Client stable id to allow reconnects across page reload
+const CLIENT_ID_KEY = 'strangers_client_id';
+let CLIENT_ID = localStorage.getItem(CLIENT_ID_KEY);
+if (!CLIENT_ID) {
+  try {
+    CLIENT_ID = crypto.randomUUID();
+  } catch (e) {
+    CLIENT_ID = 'c_' + Math.random().toString(36).slice(2);
+  }
+  localStorage.setItem(CLIENT_ID_KEY, CLIENT_ID);
+}
+
 // ============================================
 // TIMERS MANAGER
 // ============================================
@@ -70,8 +82,10 @@ function clearAllTimers() {
 const CONFIG = {
   SOCKET_URL: 'https://urban-capybara-jv4j5754gpw3qpv6-8000.app.github.dev',
   ICE_CONNECTION_TIMEOUT: 30000,
+  // Increase ICE timeout to allow slower networks / TURN allocation
+  // Note: server-side TURN reliability needed for cross-network tests
+  ICE_CONNECTION_TIMEOUT: 60000,
   MAX_VIDEO_PLAY_RETRIES: 5,
-  MAX_RECONNECT_RETRIES: 5,
   STATS_INTERVAL: 5000,
   QUALITY: {
     high: { maxBitrate: 5000000, minBitrate: 1500000 },
@@ -149,12 +163,9 @@ function handleError(type, error) {
   log('ERROR', type, error);
   
   if (type.includes('ICE') || type.includes('connection')) {
-    if (!STATE.isReconnecting && STATE.retryCount < CONFIG.MAX_RECONNECT_RETRIES) {
-      scheduleReconnect();
-    } else if (STATE.retryCount >= CONFIG.MAX_RECONNECT_RETRIES) {
-      showNotification('Connection failed. Please try again.');
-      STATE.retryCount = 0;
-    }
+    // Do not attempt automatic reconnection — require user action (Next) to reconnect
+    showNotification('Connection failed. Please press NEXT to try another partner.');
+    STATE.retryCount = 0;
   }
 }
 
@@ -175,11 +186,7 @@ function scheduleReconnect() {
   
   setAppState(AppState.RECONNECTING);
   
-  setTimer('reconnect', () => {
-    // Use a light cleanup to preserve local media (don't drop the user's mic)
-    lightCleanup();
-    restartConnection();
-  }, delay);
+  // Reconnections are disabled. Do not schedule automatic reconnects.
 }
 
 // ============================================
@@ -276,17 +283,33 @@ function createPeerConnection() {
     return;
   }
   
+  const iceServers = STATE.iceServers || ICE_SERVERS;
+  log('PEER', 'Using ICE servers', iceServers);
   STATE.peer = new RTCPeerConnection({
-    iceServers: ICE_SERVERS,
+    iceServers: iceServers,
     iceCandidatePoolSize: 20,
     bundlePolicy: 'max-bundle',
     rtcpMuxPolicy: 'require'
   });
   
   STATE.peer.onicecandidate = (e) => {
-    if (e.candidate && STATE.remoteSocket) {
-      log('ICE', 'Sending candidate', e.candidate);
-      try { STATE.socket.emit('ice:send', { candidate: e.candidate }); } catch (e) {}
+    if (e.candidate) {
+      // Log candidate details and whether remote is set
+      const isRelay = e.candidate.candidate && e.candidate.candidate.indexOf('typ relay') !== -1;
+      log('ICE', `Candidate generated (relay=${isRelay})`, e.candidate);
+      try {
+        if (STATE.remoteSocket) {
+          STATE.socket.emit('ice:send', { candidate: e.candidate });
+        } else {
+          // queue locally if remote not yet known
+          const key = e.candidate.candidate || JSON.stringify(e.candidate);
+          if (!STATE.pendingIceCandidates.some(c => (c && c.candidate ? c.candidate : JSON.stringify(c)) === key)) {
+            STATE.pendingIceCandidates.push(e.candidate);
+          }
+        }
+      } catch (err) {
+        log('ICE', 'Failed to send candidate', err);
+      }
     }
   };
   
@@ -315,7 +338,16 @@ function createPeerConnection() {
     const state = STATE.peer?.iceConnectionState;
     log('PEER', `ICE state: ${state}`);
     
-    if (state === 'failed') {
+    if (state === 'failed' || state === 'disconnected') {
+      // gather diagnostics
+      (async () => {
+        try {
+          const stats = await STATE.peer.getStats();
+          log('ICE', 'Peer stats on failure', stats);
+        } catch (e) {
+          log('ICE', 'Failed to collect stats', e);
+        }
+      })();
       handleError('ICE_FAILED', state);
     }
   };
@@ -458,6 +490,7 @@ async function handleSdp(sdp) {
 // ICE
 // ============================================
 async function handleIce(candidate) {
+  log('ICE', 'handleIce called', candidate);
   if (!STATE.peer) {
     // queue without duplicates
     const key = candidate && candidate.candidate ? candidate.candidate : JSON.stringify(candidate);
@@ -477,6 +510,7 @@ async function handleIce(candidate) {
   
   try {
     await STATE.peer.addIceCandidate(new RTCIceCandidate(candidate));
+    log('ICE', 'addIceCandidate succeeded');
   } catch (err) {
     log('ICE', 'Error adding candidate', err);
   }
@@ -602,6 +636,14 @@ function fullCleanup() {
   STATE.isNegotiating = false;
   
   if (STATE.peer) {
+    try {
+      // Remove event handlers to avoid onicecandidate firing during/after close
+      try { STATE.peer.onicecandidate = null; } catch(e){}
+      try { STATE.peer.ontrack = null; } catch(e){}
+      try { STATE.peer.onconnectionstatechange = null; } catch(e){}
+      try { STATE.peer.oniceconnectionstatechange = null; } catch(e){}
+      try { STATE.peer.onnegotiationneeded = null; } catch(e){}
+    } catch (e) {}
     STATE.peer.close();
     STATE.peer = null;
   }
@@ -635,6 +677,13 @@ function lightCleanup() {
   STATE.isNegotiating = false;
 
   if (STATE.peer) {
+    try {
+      try { STATE.peer.onicecandidate = null; } catch(e){}
+      try { STATE.peer.ontrack = null; } catch(e){}
+      try { STATE.peer.onconnectionstatechange = null; } catch(e){}
+      try { STATE.peer.oniceconnectionstatechange = null; } catch(e){}
+      try { STATE.peer.onnegotiationneeded = null; } catch(e){}
+    } catch (e) {}
     try { STATE.peer.close(); } catch (e) {}
     STATE.peer = null;
   }
@@ -642,6 +691,10 @@ function lightCleanup() {
   // Keep STATE.localStream and DOM.myVideo.srcObject intact so user doesn't lose mic permission
   DOM.strangerVideo.srcObject = null;
   DOM.spinner.style.display = 'flex';
+
+  // Also clear remote socket/room references so no further signaling is attempted
+  STATE.remoteSocket = null;
+  STATE.roomid = null;
 
   // light cleanup performed (no logs)
 }
@@ -664,9 +717,10 @@ function restartConnection() {
       log('MEDIA', 'Init media failed', err);
     }
     
-    STATE.socket.emit('start', (newType) => {
+    STATE.socket.emit('start', CLIENT_ID, (newType) => {
       STATE.type = newType;
     });
+    
   }, CONFIG.MAX_RECONNECT_RETRIES);
 }
 
@@ -677,10 +731,8 @@ function setupSocketEvents() {
   STATE.socket.on('connect', () => {
     log('SOCKET', 'Connected');
     setAppState(AppState.CONNECTING);
-    STATE.socket.emit('start', (personType) => {
-      STATE.type = personType;
-      log('SOCKET', `My type: ${personType}`);
-    });
+    // Do not emit 'start' here — wait until ICE servers are loaded in init()
+    log('SOCKET', 'Connect event (start will be sent after ICE servers fetched)');
   });
   
   STATE.socket.on('roomid', (id) => {
@@ -802,15 +854,32 @@ function setupUIEvents() {
   DOM.exitBtn.addEventListener('click', () => {
     STATE.isExiting = true;
     fullCleanup();
-    STATE.socket.emit('disconnect-me');
-    window.location.href = '/';
+    // Ask server to perform disconnect and wait for confirmation before actually disconnecting socket
+    let didAck = false;
+    try {
+      STATE.socket.emit('disconnect-me', () => {
+        didAck = true;
+        try { STATE.socket.disconnect(); } catch (e) {}
+        window.location.href = '/';
+      });
+    } catch (e) {}
+
+    // Fallback: if server doesn't ack within 500ms, force disconnect and navigate
+    setTimeout(() => {
+      if (!didAck) {
+        try { STATE.socket.disconnect(); } catch (e) {}
+        window.location.href = '/';
+      }
+    }, 500);
   });
   
   DOM.nextBtn.addEventListener('click', () => {
-    fullCleanup();
+    // For 'Next' we want to keep local media and just ask server for a new partner
+    lightCleanup();
     STATE.retryCount = 0;
     STATE.isReconnecting = false;
-    restartConnection();
+    try { STATE.socket.emit('next'); } catch (e) { log('SOCKET', 'emit next failed', e); }
+    setAppState(AppState.CONNECTING);
   });
   
   DOM.cameraBtn.addEventListener('click', () => {
@@ -828,6 +897,7 @@ function setupUIEvents() {
         log('MEDIA', 'Fallback camera init triggered', err && err.name);
       }).then(newStream => {
         const newVideo = newStream.getVideoTracks();
+        console.log('[MEDIA] getMediaStreamWithFallback returned tracks', { video: newVideo.length, audio: newStream.getAudioTracks().length });
         if (!newVideo || newVideo.length === 0) {
           showNotification('No camera found');
           // stop any tracks from the helper stream
@@ -944,6 +1014,24 @@ function setupUIEvents() {
   DOM.inputField.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') sendMessage();
   });
+
+  // Typing indicator: emit typing true/false with debounce
+  let typingTimer = null;
+  DOM.inputField.addEventListener('input', () => {
+    try {
+      if (STATE.socket && STATE.roomid) {
+        STATE.socket.emit('typing', { roomid: STATE.roomid, isTyping: true });
+      }
+    } catch (e) {}
+    if (typingTimer) clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+      try {
+        if (STATE.socket && STATE.roomid) {
+          STATE.socket.emit('typing', { roomid: STATE.roomid, isTyping: false });
+        }
+      } catch (e) {}
+    }, 1000);
+  });
 }
 
 function showNotification(message) {
@@ -967,6 +1055,37 @@ function showNotification(message) {
 async function init() {
   STATE.socket = io(CONFIG.SOCKET_URL);
   setupSocketEvents();
+
+  // Fetch ICE servers from server (may include TURN)
+  try {
+    const resp = await fetch(`${CONFIG.SOCKET_URL.replace(/\/$/, '')}/ice`);
+    const json = await resp.json();
+    if (json && json.servers) {
+      STATE.iceServers = json.servers;
+      log('INIT', 'ICE servers loaded', STATE.iceServers);
+    }
+  } catch (e) {
+    log('INIT', 'Could not fetch ICE servers', e);
+  }
+  // Now that ICE servers are known, emit start (or wait for connect)
+  try {
+    const doStart = () => {
+      try {
+        STATE.socket.emit('start', CLIENT_ID, (personType) => {
+          STATE.type = personType;
+          log('SOCKET', `My type: ${personType}`);
+        });
+      } catch (e) {
+        log('SOCKET', 'emit start failed', e);
+      }
+    };
+
+    if (STATE.socket && STATE.socket.connected) {
+      doStart();
+    } else if (STATE.socket) {
+      STATE.socket.once('connect', doStart);
+    }
+  } catch (e) {}
   setupUIEvents();
   
   setAppState(AppState.CONNECTING);
