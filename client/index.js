@@ -80,7 +80,7 @@ function clearAllTimers() {
 // CONFIGURACIÓN
 // ============================================
 const CONFIG = {
-  SOCKET_URL: 'https://silver-guide-rqr4g6grrjgcqrv-8000.app.github.dev',
+  SOCKET_URL: 'https://3bd1-190-107-209-205.ngrok-free.app',
   ICE_CONNECTION_TIMEOUT: 30000,
   // Increase ICE timeout to allow slower networks / TURN allocation
   // Note: server-side TURN reliability needed for cross-network tests
@@ -131,17 +131,17 @@ function setAppState(newState) {
 
 function canPerformAction(action) {
   const current = STATE.appState;
-  
+
   if (action === 'cleanup' || action === 'exit') return true;
-  
+
   if (current === AppState.NEGOTIATING && (action === 'match' || action === 'offer')) {
     return false;
   }
-  
+
   if (current === AppState.RECONNECTING && (action === 'match' || action === 'offer')) {
     return false;
   }
-  
+
   return true;
 }
 
@@ -160,7 +160,7 @@ function safeAsync(fn, context) {
 
 function handleError(type, error) {
   log('ERROR', type, error);
-  
+
   if (type.includes('ICE') || type.includes('connection')) {
     // Do not attempt automatic reconnection — require user action (Next) to reconnect
     showNotification('Connection failed. Please press NEXT to try another partner.');
@@ -177,14 +177,14 @@ function getBackoffDelay(retryCount) {
 
 function scheduleReconnect() {
   if (STATE.isExiting || STATE.isReconnecting) return;
-  
+
   STATE.isReconnecting = true;
   STATE.retryCount++;
-  
+
   const delay = getBackoffDelay(STATE.retryCount);
-  
+
   setAppState(AppState.RECONNECTING);
-  
+
   // Reconnections are disabled. Do not schedule automatic reconnects.
 }
 
@@ -206,13 +206,13 @@ async function initMedia() {
     // Attach audio-only stream to local video element (will be blank until camera added)
     DOM.myVideo.srcObject = STATE.localStream;
     DOM.myVideo.muted = true;
-    
+
     const tracks = getStreamTracks(STATE.localStream);
     log('MEDIA', 'Stream initialized - Camera ON', {
       videoTracks: tracks.video.length,
       audioTracks: tracks.audio.length
     });
-    
+
   } catch (err) {
     log('MEDIA', 'Error initializing media', err);
     throw err;
@@ -227,11 +227,11 @@ function setupVideoListeners() {
     STATE.videoPlayRetries = 0;
     log('VIDEO', 'Playing');
   };
-  
+
   DOM.strangerVideo.onwaiting = () => attemptPlay();
   DOM.strangerVideo.onstalled = () => attemptPlay();
   DOM.strangerVideo.onerror = () => attemptPlay();
-  
+
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       log('VIDEO', 'Tab hidden');
@@ -244,17 +244,17 @@ function setupVideoListeners() {
 
 function attemptPlay() {
   if (!DOM.strangerVideo.srcObject) return;
-  
+
   DOM.strangerVideo.muted = true;
-  
+
   if (STATE.videoPlayRetries >= CONFIG.MAX_VIDEO_PLAY_RETRIES) {
     log('VIDEO', 'Max retries reached');
     return;
   }
-  
+
   STATE.videoPlayRetries++;
   const delay = Math.min(1000 * Math.pow(2, STATE.videoPlayRetries), 5000);
-  
+
   DOM.strangerVideo.play()
     .catch(() => {
       log('VIDEO', `Retry ${STATE.videoPlayRetries} in ${delay}ms`);
@@ -281,7 +281,7 @@ function createPeerConnection() {
     log('PEER', 'Cannot create - action blocked by FSM');
     return;
   }
-  
+
   const iceServers = STATE.iceServers || ICE_SERVERS;
   log('PEER', 'Using ICE servers', iceServers);
   STATE.peer = new RTCPeerConnection({
@@ -290,7 +290,7 @@ function createPeerConnection() {
     bundlePolicy: 'max-bundle',
     rtcpMuxPolicy: 'require'
   });
-  
+
   STATE.peer.onicecandidate = (e) => {
     if (e.candidate) {
       // Log candidate details and whether remote is set
@@ -311,18 +311,18 @@ function createPeerConnection() {
       }
     }
   };
-  
+
   STATE.peer.ontrack = (e) => {
     log('PEER', `Track received: ${e.track.kind}`);
     DOM.strangerVideo.srcObject = e.streams[0];
     setupVideoListeners();
     attemptPlay();
   };
-  
+
   STATE.peer.onconnectionstatechange = () => {
     const state = STATE.peer?.connectionState;
     log('PEER', `Connection state: ${state}`);
-    
+
     if (state === 'connected') {
       clearTimer('iceTimeout');
       setAppState(AppState.CONNECTED);
@@ -332,11 +332,11 @@ function createPeerConnection() {
       handleError('CONNECTION_FAILED', state);
     }
   };
-  
+
   STATE.peer.oniceconnectionstatechange = () => {
     const state = STATE.peer?.iceConnectionState;
     log('PEER', `ICE state: ${state}`);
-    
+
     if (state === 'failed' || state === 'disconnected') {
       // gather diagnostics
       (async () => {
@@ -350,42 +350,42 @@ function createPeerConnection() {
       handleError('ICE_FAILED', state);
     }
   };
-  
+
   STATE.peer.onnegotiationneeded = () => {
     if (STATE.peer.signalingState === 'stable') {
       createOffer();
     }
   };
-  
+
   // Add tracks if stream exists
   if (STATE.localStream) {
     enableVideoTracks(STATE.localStream);
     enableAudioTracks(STATE.localStream);
-    
+
     STATE.localStream.getTracks().forEach(track => {
       STATE.peer.addTrack(track, STATE.localStream);
     });
     configureBitrate();
   }
-  
+
   setTimer('iceTimeout', () => {
     if (STATE.peer?.iceConnectionState !== 'connected') {
       handleError('ICE_TIMEOUT', 'No connection after 30s');
     }
   }, CONFIG.ICE_CONNECTION_TIMEOUT);
-  
+
   log('PEER', 'Connection created');
 }
 
 function configureBitrate() {
   if (!STATE.peer) return;
-  
+
   STATE.peer.getSenders().forEach(sender => {
     if (!sender.track) return;
-    
+
     const params = sender.getParameters();
     if (!params.encodings) params.encodings = [{}];
-    
+
     if (sender.track.kind === 'video') {
       params.encodings[0] = {
         ...params.encodings[0],
@@ -402,8 +402,8 @@ function configureBitrate() {
         priority: 'high'
       };
     }
-    
-    sender.setParameters(params).catch(() => {});
+
+    sender.setParameters(params).catch(() => { });
   });
 }
 
@@ -415,25 +415,25 @@ async function createOffer() {
     log('SDP', 'createOffer blocked');
     return;
   }
-  
+
   if (STATE.isNegotiating) {
     log('SDP', 'Already negotiating, skipping');
     return;
   }
-  
+
   STATE.isNegotiating = true;
   setAppState(AppState.NEGOTIATING);
-  
+
   try {
     const offer = await STATE.peer.createOffer({
       offerToReceiveAudio: true,
       offerToReceiveVideo: true
     });
-    
+
     await STATE.peer.setLocalDescription(offer);
     log('SDP', 'Sending offer', STATE.peer.localDescription.type);
-    try { STATE.socket.emit('sdp:send', { sdp: STATE.peer.localDescription }); } catch (e) {}
-    
+    try { STATE.socket.emit('sdp:send', { sdp: STATE.peer.localDescription }); } catch (e) { }
+
     log('SDP', 'Offer sent');
   } catch (err) {
     log('ERROR', 'createOffer failed', err);
@@ -461,8 +461,8 @@ async function handleSdp(sdp) {
       // Create and send answer
       const answer = await STATE.peer.createAnswer();
       await STATE.peer.setLocalDescription(answer);
-        log('SDP', 'Sending answer', STATE.peer.localDescription.type);
-        try { STATE.socket.emit('sdp:send', { sdp: STATE.peer.localDescription }); } catch (e) {}
+      log('SDP', 'Sending answer', STATE.peer.localDescription.type);
+      try { STATE.socket.emit('sdp:send', { sdp: STATE.peer.localDescription }); } catch (e) { }
       log('SDP', 'Answer sent');
 
     } else if (sdp.type === 'answer') {
@@ -498,7 +498,7 @@ async function handleIce(candidate) {
     }
     return;
   }
-  
+
   if (!STATE.peer.remoteDescription || !STATE.peer.remoteDescription.type) {
     const key = candidate && candidate.candidate ? candidate.candidate : JSON.stringify(candidate);
     if (!STATE.pendingIceCandidates.some(c => (c && c.candidate ? c.candidate : JSON.stringify(c)) === key)) {
@@ -506,7 +506,7 @@ async function handleIce(candidate) {
     }
     return;
   }
-  
+
   try {
     await STATE.peer.addIceCandidate(new RTCIceCandidate(candidate));
     log('ICE', 'addIceCandidate succeeded');
@@ -517,12 +517,12 @@ async function handleIce(candidate) {
 
 function processPendingMessages() {
   if (!STATE.peer) return;
-  
+
   if (STATE.pendingIceCandidates.length > 0) {
     STATE.pendingIceCandidates.forEach(handleIce);
     STATE.pendingIceCandidates = [];
   }
-  
+
   if (STATE.pendingSdp) {
     // Try to process pending SDP only if signaling state allows
     const s = STATE.pendingSdp;
@@ -545,26 +545,26 @@ function processPendingMessages() {
 // ============================================
 function adaptBitrate(bitrate, rtt) {
   if (!STATE.peer) return;
-  
+
   let newLevel = 'high';
   if (rtt > 400 || bitrate < 300000) newLevel = 'low';
   else if (rtt > 200 || bitrate < 800000) newLevel = 'medium';
-  
+
   if (newLevel !== STATE.currentQualityLevel) {
     const preset = CONFIG.QUALITY[newLevel];
     STATE.currentQualityLevel = newLevel;
-    
+
     STATE.peer.getSenders().forEach(sender => {
       if (sender.track?.kind === 'video') {
         const params = sender.getParameters();
         if (params.encodings?.[0]) {
           params.encodings[0].maxBitrate = preset.maxBitrate;
           params.encodings[0].minBitrate = preset.minBitrate;
-          sender.setParameters(params).catch(() => {});
+          sender.setParameters(params).catch(() => { });
         }
       }
     });
-    
+
     log('QUALITY', `Changed to ${newLevel}`, { rtt, bitrate });
   }
 }
@@ -578,14 +578,14 @@ let lastTime = 0;
 
 function startStatsMonitoring() {
   if (statsInterval) clearInterval(statsInterval);
-  
+
   statsInterval = setInterval(safeAsync(async () => {
     if (!STATE.peer || STATE.peer.connectionState === 'closed') return;
-    
+
     const stats = await STATE.peer.getStats();
     let videoInbound = null;
     let candidatePair = null;
-    
+
     stats.forEach(report => {
       if (report.type === 'inbound-rtp' && report.kind === 'video') {
         videoInbound = report;
@@ -594,22 +594,22 @@ function startStatsMonitoring() {
         candidatePair = report;
       }
     });
-    
+
     if (!videoInbound) return;
-    
+
     const now = Date.now();
     if (lastTime > 0) {
       const timeDiff = (now - lastTime) / 1000;
       const bytesDiff = (videoInbound.bytesReceived || 0) - lastBytes;
       const bitrate = timeDiff > 0 ? Math.round((bytesDiff * 8) / timeDiff) : 0;
-      
-      const rtt = candidatePair?.currentRoundTripTime 
-        ? candidatePair.currentRoundTripTime * 1000 
+
+      const rtt = candidatePair?.currentRoundTripTime
+        ? candidatePair.currentRoundTripTime * 1000
         : 0;
-      
+
       adaptBitrate(bitrate, rtt);
     }
-    
+
     lastBytes = videoInbound.bytesReceived || 0;
     lastTime = now;
   }, 'STATS'), CONFIG.STATS_INTERVAL);
@@ -620,43 +620,43 @@ function startStatsMonitoring() {
 // ============================================
 function fullCleanup() {
   log('CLEANUP', 'Starting');
-  
+
   clearAllTimers();
-  
+
   if (statsInterval) {
     clearInterval(statsInterval);
     statsInterval = null;
   }
-  
+
   STATE.videoPlayRetries = 0;
   STATE.pendingSdp = null;
   STATE.pendingIceCandidates = [];
   STATE.currentQualityLevel = 'high';
   STATE.isNegotiating = false;
-  
+
   if (STATE.peer) {
     try {
       // Remove event handlers to avoid onicecandidate firing during/after close
-      try { STATE.peer.onicecandidate = null; } catch(e){}
-      try { STATE.peer.ontrack = null; } catch(e){}
-      try { STATE.peer.onconnectionstatechange = null; } catch(e){}
-      try { STATE.peer.oniceconnectionstatechange = null; } catch(e){}
-      try { STATE.peer.onnegotiationneeded = null; } catch(e){}
-    } catch (e) {}
+      try { STATE.peer.onicecandidate = null; } catch (e) { }
+      try { STATE.peer.ontrack = null; } catch (e) { }
+      try { STATE.peer.onconnectionstatechange = null; } catch (e) { }
+      try { STATE.peer.oniceconnectionstatechange = null; } catch (e) { }
+      try { STATE.peer.onnegotiationneeded = null; } catch (e) { }
+    } catch (e) { }
     STATE.peer.close();
     STATE.peer = null;
   }
-  
+
   if (STATE.localStream) {
     stopMediaStream(STATE.localStream);
     STATE.localStream = null;
   }
-  
+
   DOM.myVideo.srcObject = null;
   DOM.strangerVideo.srcObject = null;
   DOM.spinner.style.display = 'flex';
   DOM.chatWrapper.innerHTML = '';
-  
+
   log('CLEANUP', 'Complete');
 }
 
@@ -677,13 +677,13 @@ function lightCleanup() {
 
   if (STATE.peer) {
     try {
-      try { STATE.peer.onicecandidate = null; } catch(e){}
-      try { STATE.peer.ontrack = null; } catch(e){}
-      try { STATE.peer.onconnectionstatechange = null; } catch(e){}
-      try { STATE.peer.oniceconnectionstatechange = null; } catch(e){}
-      try { STATE.peer.onnegotiationneeded = null; } catch(e){}
-    } catch (e) {}
-    try { STATE.peer.close(); } catch (e) {}
+      try { STATE.peer.onicecandidate = null; } catch (e) { }
+      try { STATE.peer.ontrack = null; } catch (e) { }
+      try { STATE.peer.onconnectionstatechange = null; } catch (e) { }
+      try { STATE.peer.oniceconnectionstatechange = null; } catch (e) { }
+      try { STATE.peer.onnegotiationneeded = null; } catch (e) { }
+    } catch (e) { }
+    try { STATE.peer.close(); } catch (e) { }
     STATE.peer = null;
   }
 
@@ -706,7 +706,7 @@ function restartConnection() {
   STATE.roomid = null;
   STATE.type = null;
   STATE.isNegotiating = false;
-  
+
   // Request server to perform disconnect handling and wait for confirmation
   // to avoid racing with server-side cleanup (which could lead to stale rooms
   // or device locks). Use a short fallback timeout if server doesn't ack.
@@ -756,20 +756,20 @@ function setupSocketEvents() {
     // Do not emit 'start' here — wait until ICE servers are loaded in init()
     log('SOCKET', 'Connect event (start will be sent after ICE servers fetched)');
   });
-  
+
   STATE.socket.on('roomid', (id) => {
     STATE.roomid = id;
     log('SOCKET', `Room: ${id}`);
   });
-  
+
   STATE.socket.on('remote-socket', (partnerId) => {
     if (!canPerformAction('match')) return;
-    
+
     log('SOCKET', `Partner: ${partnerId}`);
     STATE.remoteSocket = partnerId;
     DOM.spinner.style.display = 'none';
     setAppState(AppState.MATCHED);
-    
+
     // Create peer connection
     createPeerConnection();
     // Send our current media state to the peer so they can reflect camera/audio immediately
@@ -777,14 +777,14 @@ function setupSocketEvents() {
       if (STATE.socket && STATE.roomid) {
         STATE.socket.emit('media:state', { cameraOff: STATE.isCameraOff, muted: STATE.isMuted, roomid: STATE.roomid, type: STATE.type });
       }
-    } catch (e) {}
-    
+    } catch (e) { }
+
     // If we already have a stream, process pending messages
     if (STATE.localStream) {
       processPendingMessages();
     }
   });
-  
+
   STATE.socket.on('disconnected', () => {
     if (!STATE.isExiting) {
       // If we had a matched partner, treat this as partner leaving: do not attempt automatic reconnect
@@ -819,7 +819,7 @@ function setupSocketEvents() {
           DOM.strangerVideo.style.opacity = '0.3';
           DOM.strangerVideo.dataset.cameraOff = '1';
         }
-      } catch (e) {}
+      } catch (e) { }
     } else {
       try {
         if (DOM.strangerVideo) {
@@ -827,7 +827,7 @@ function setupSocketEvents() {
           delete DOM.strangerVideo.dataset.cameraOff;
           attemptPlay();
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // Respect remote audio mute state by muting/unmuting remote video element
@@ -843,30 +843,30 @@ function setupSocketEvents() {
     // If local needs to renegotiate later, it will emit its own 'renegotiate'.
     log('SOCKET', `Renegotiate requested from ${from}`);
   });
-  
+
   STATE.socket.on('disconnect-confirm', fullCleanup);
-  
+
   STATE.socket.on('sdp:reply', ({ sdp }) => {
     log('SDP', `Received: ${sdp.type}`);
-    
+
     if (!STATE.peer) {
       STATE.pendingSdp = sdp;
       return;
     }
-    
+
     handleSdp(sdp);
     processPendingMessages();
   });
-  
+
   STATE.socket.on('ice:reply', ({ candidate }) => {
     handleIce(candidate);
   });
-  
+
   STATE.socket.on('get-message', (message) => {
     DOM.chatWrapper.innerHTML += `<div class="msg"><b>Stranger: </b> <span>${sanitize(message)}</span></div>`;
     DOM.chatWrapper.scrollTop = DOM.chatWrapper.scrollHeight;
   });
-  
+
   STATE.socket.on('typing', (isTyping) => {
     DOM.typingIndicator.style.display = isTyping ? 'block' : 'none';
   });
@@ -883,27 +883,27 @@ function setupUIEvents() {
     try {
       STATE.socket.emit('disconnect-me', () => {
         didAck = true;
-        try { fullCleanup(); } catch (e) {}
-        try { STATE.socket.disconnect(); } catch (e) {}
+        try { fullCleanup(); } catch (e) { }
+        try { STATE.socket.disconnect(); } catch (e) { }
         window.location.href = '/';
       });
     } catch (e) {
       // If emit itself fails, still perform cleanup and navigate
-      try { fullCleanup(); } catch (e) {}
-      try { STATE.socket.disconnect(); } catch (e) {}
+      try { fullCleanup(); } catch (e) { }
+      try { STATE.socket.disconnect(); } catch (e) { }
       window.location.href = '/';
     }
 
     // Fallback: if server doesn't ack within 500ms, force cleanup, disconnect and navigate
     setTimeout(() => {
       if (!didAck) {
-        try { fullCleanup(); } catch (e) {}
-        try { STATE.socket.disconnect(); } catch (e) {}
+        try { fullCleanup(); } catch (e) { }
+        try { STATE.socket.disconnect(); } catch (e) { }
         window.location.href = '/';
       }
     }, 500);
   });
-  
+
   DOM.nextBtn.addEventListener('click', () => {
     // Turn off camera before finding new partner
     if (STATE.localStream) {
@@ -932,13 +932,13 @@ function setupUIEvents() {
     try { STATE.socket.emit('next'); } catch (e) { log('SOCKET', 'emit next failed', e); }
     setAppState(AppState.CONNECTING);
   });
-  
+
   DOM.cameraBtn.addEventListener('click', () => {
     if (!STATE.localStream) {
       showNotification('No camera available');
       return;
     }
-    
+
     const { video } = getStreamTracks(STATE.localStream);
 
     // If we don't have any video tracks yet and user requested camera ON, request camera
@@ -960,12 +960,12 @@ function setupUIEvents() {
         newVideo.forEach(track => {
           try {
             STATE.localStream.addTrack(track);
-          } catch (e) {}
+          } catch (e) { }
           try {
             if (STATE.peer) {
               STATE.peer.addTrack(track, STATE.localStream);
             }
-          } catch (e) {}
+          } catch (e) { }
         });
 
         // stop audio tracks from the helper stream to avoid duplicates
@@ -989,12 +989,12 @@ function setupUIEvents() {
               if (STATE.peer && STATE.peer.signalingState === 'stable' && !STATE.isNegotiating) {
                 createOffer();
               }
-            } catch (e) {}
+            } catch (e) { }
           }, 250);
-        } catch (e) {}
+        } catch (e) { }
 
         // Notify peer about media state as well
-        try { if (STATE.socket && STATE.roomid) STATE.socket.emit('media:state', { cameraOff: STATE.isCameraOff, muted: STATE.isMuted, roomid: STATE.roomid, type: STATE.type }); } catch (e) {}
+        try { if (STATE.socket && STATE.roomid) STATE.socket.emit('media:state', { cameraOff: STATE.isCameraOff, muted: STATE.isMuted, roomid: STATE.roomid, type: STATE.type }); } catch (e) { }
       }).then(null, err => {
         log('MEDIA', 'Could not access camera', err && err.name);
         showNotification('Could not access camera');
@@ -1016,9 +1016,9 @@ function setupUIEvents() {
       if (STATE.socket && STATE.roomid) {
         STATE.socket.emit('media:state', { cameraOff: STATE.isCameraOff, muted: STATE.isMuted, roomid: STATE.roomid, type: STATE.type });
       }
-    } catch (e) {}
+    } catch (e) { }
   });
-  
+
   const muteBtn = document.getElementById('muteBtn');
   if (muteBtn) {
     muteBtn.addEventListener('click', () => {
@@ -1026,18 +1026,18 @@ function setupUIEvents() {
         showNotification('No audio available');
         return;
       }
-      
+
       const { audio } = getStreamTracks(STATE.localStream);
       if (audio.length === 0) {
         showNotification('No audio track');
         return;
       }
-      
+
       STATE.isMuted = !STATE.isMuted;
       audio.forEach(track => {
         track.enabled = !STATE.isMuted;
       });
-      
+
       muteBtn.querySelector('.glitch-text').textContent = STATE.isMuted ? 'ON' : 'OFF';
       showNotification(STATE.isMuted ? 'Audio OFF' : 'Audio ON');
       // Notify peer about audio state change
@@ -1045,22 +1045,22 @@ function setupUIEvents() {
         if (STATE.socket && STATE.roomid) {
           STATE.socket.emit('media:state', { cameraOff: STATE.isCameraOff, muted: STATE.isMuted, roomid: STATE.roomid, type: STATE.type });
         }
-      } catch (e) {}
+      } catch (e) { }
     });
   }
-  
+
   const sendMessage = () => {
     const message = DOM.inputField.value.trim();
     if (message && STATE.roomid) {
       const sanitized = sanitize(message);
       STATE.socket.emit('send-message', sanitized, STATE.type, STATE.roomid);
-      
+
       DOM.chatWrapper.innerHTML += `<div class="msg"><b>You: </b> <span>${sanitized}</span></div>`;
       DOM.inputField.value = '';
       DOM.chatWrapper.scrollTop = DOM.chatWrapper.scrollHeight;
     }
   };
-  
+
   DOM.sendButton.addEventListener('click', sendMessage);
   DOM.inputField.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') sendMessage();
@@ -1073,14 +1073,14 @@ function setupUIEvents() {
       if (STATE.socket && STATE.roomid) {
         STATE.socket.emit('typing', { roomid: STATE.roomid, isTyping: true });
       }
-    } catch (e) {}
+    } catch (e) { }
     if (typingTimer) clearTimeout(typingTimer);
     typingTimer = setTimeout(() => {
       try {
         if (STATE.socket && STATE.roomid) {
           STATE.socket.emit('typing', { roomid: STATE.roomid, isTyping: false });
         }
-      } catch (e) {}
+      } catch (e) { }
     }, 1000);
   });
 }
@@ -1090,9 +1090,9 @@ function showNotification(message) {
   notification.className = 'notification';
   notification.textContent = message;
   notification.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.7);color:white;padding:10px 20px;border-radius:5px;z-index:9999';
-  
+
   document.body.appendChild(notification);
-  
+
   setTimeout(() => {
     notification.style.opacity = '0';
     notification.style.transition = 'opacity 0.5s';
@@ -1136,11 +1136,11 @@ async function init() {
     } else if (STATE.socket) {
       STATE.socket.once('connect', doStart);
     }
-  } catch (e) {}
+  } catch (e) { }
   setupUIEvents();
-  
+
   setAppState(AppState.CONNECTING);
-  
+
   try {
     await initMedia();
   } catch (err) {
