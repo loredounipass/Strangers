@@ -94,14 +94,14 @@ export function useSocket({
       setSpinnerVisible(true);
       setAppState(AppState.CONNECTING);
 
-      // Re-inicializar media y buscar nueva pareja
-      // El server ya puso a este socket en waitingQueue,
-      // solo necesitamos re-emitir start para que nos matcheen
+      // Re-buscar pareja. Solo re-inicializar media si el stream se perdió.
       (async () => {
-        try {
-          await initMedia(myVideoRef?.current);
-        } catch (e) {
-          console.warn('[SOCKET] Reinit media failed', e);
+        if (!STATE.localStream) {
+          try {
+            await initMedia(myVideoRef?.current);
+          } catch (e) {
+            console.warn('[SOCKET] Reinit media failed', e);
+          }
         }
         try {
           STATE.socket.emit('start', getClientId(), (personType) => {

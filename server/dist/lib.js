@@ -113,20 +113,28 @@ function getPartnerInRoom(socketId, room) {
 // ============================================
 // MATCHMAKING
 // ============================================
-function matchPeers(io, socket1, socket2, s1ClientId, s2ClientId) {
-    const room = createRoom(socket1.id, s1ClientId);
-    room.p2 = { socketId: socket2.id, clientId: s2ClientId };
-    socketToRoom.set(socket2.id, room.roomId);
-    // Ambos se unen a la room de Socket.IO
-    socket1.join(room.roomId);
-    socket2.join(room.roomId);
+function matchPeers(io, p1Socket, p2Socket, p1ClientId, p2ClientId) {
+    // Buscar room existente de p1 (creada cuando p1 entró a la cola)
+    let room = getRoomBySocket(p1Socket.id);
+    if (!room) {
+        // Fallback: crear room nueva si p1 no tenía (no debería pasar)
+        room = createRoom(p1Socket.id, p1ClientId);
+        p1Socket.join(room.roomId);
+    }
+    // Asignar p2 a la room existente de p1
+    room.p2 = { socketId: p2Socket.id, clientId: p2ClientId };
+    socketToRoom.set(p2Socket.id, room.roomId);
+    // p2 se une a la room de Socket.IO (p1 ya está unido desde createRoom)
+    p2Socket.join(room.roomId);
     // Enviar roomid a AMBOS peers
-    socket1.emit('roomid', room.roomId);
-    socket2.emit('roomid', room.roomId);
-    // Enviar remote-socket a ambos
-    socket1.emit('remote-socket', socket2.id);
-    socket2.emit('remote-socket', socket1.id);
-    log('MATCH', `Paired ${socket1.id} (p1) <-> ${socket2.id} (p2) in room ${room.roomId}`);
+    p1Socket.emit('roomid', room.roomId);
+    p2Socket.emit('roomid', room.roomId);
+    // Enviar remote-socket a ambos para que creen peer connection
+    p1Socket.emit('remote-socket', p2Socket.id);
+    p2Socket.emit('remote-socket', p1Socket.id);
+    // Confirmar tipo a p1 (por si viene de NEXT y necesita actualización)
+    p1Socket.emit('start', 'p1');
+    log('MATCH', `Paired ${p1Socket.id} (p1) <-> ${p2Socket.id} (p2) in room ${room.roomId}`);
     return room;
 }
 // ============================================
@@ -198,13 +206,12 @@ function cleanupSocket(socketId, io, notifyPartner = true) {
         io.to(partnerId).emit('disconnected');
         log('CLEANUP', `Notified partner ${partnerId} about ${socketId} leaving`);
     }
-    // Quitar al partner de la room y destruirla
+    // Limpiar reverse index del partner
     if (partnerId) {
         socketToRoom.delete(partnerId);
-        // El partner vuelve a la cola de espera
-        if (isSocketAlive(io, partnerId)) {
-            addToWaitingQueue(partnerId);
-        }
+        // NO poner al partner en waitingQueue aquí.
+        // El client recibirá 'disconnected' y emitirá 'start' de nuevo,
+        // que llamará a handelStart() y lo pondrá en la cola correctamente.
     }
     // Destruir la room completa
     destroyRoom(room.roomId);

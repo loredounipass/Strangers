@@ -53,8 +53,7 @@ const ICE_SERVERS = [
 
 
 const CONFIG = {
-  SOCKET_URL: 'https://silver-guide-rqr4g6grrjgcqrv-8000.app.github.dev',
-  ICE_CONNECTION_TIMEOUT: 30000, // 30s — 60s era demasiado esperar
+  ICE_CONNECTION_TIMEOUT: 30000, // 30s
   STATS_INTERVAL: 5000,
   QUALITY: {
     high:   { maxBitrate: 5000000, minBitrate: 1500000 },
@@ -458,7 +457,7 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
 
     timers.setTimer('iceTimeout', () => {
       if (STATE.peer?.iceConnectionState !== 'connected') {
-        handleError('ICE_TIMEOUT', 'No connection after 60s');
+        handleError('ICE_TIMEOUT', `No connection after ${CONFIG.ICE_CONNECTION_TIMEOUT / 1000}s`);
       }
     }, CONFIG.ICE_CONNECTION_TIMEOUT);
 
