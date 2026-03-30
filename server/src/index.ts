@@ -54,13 +54,13 @@ const io = new Server(server, {
   pingInterval: 5000,
 });
 
-let online: number = 0;
+const activeSockets: Set<string> = new Set();
 let roomArr: room[] = [];
 
 io.on('connection', (socket: Socket) => {
-  online++;
-  console.log('[SERVER] emit online ->', online);
-  io.emit('online', online);
+  activeSockets.add(socket.id);
+  console.log('[SERVER] emit online ->', activeSockets.size);
+  io.emit('online', activeSockets.size);
   console.log('[SERVER] New socket connected:', socket.id);
 
   // START (client may provide a persistent clientId to allow reconnection)
@@ -83,37 +83,35 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-// DISCONNECT
+// DISCONNECT (unexpected network disconnect)
 socket.on('disconnect', () => {
-  handelDisconnect(socket.id, roomArr, io);
-  if (online > 0) {
-    online--;
-    console.log('[SERVER] emit online ->', online);
-    io.emit('online', online);
-  }
+  handelDisconnect(socket.id, roomArr, io, false);
+  if (activeSockets.has(socket.id)) activeSockets.delete(socket.id);
+  console.log('[SERVER] emit online ->', activeSockets.size);
+  io.emit('online', activeSockets.size);
 });
 
 // DISCONNECT-ME
 socket.on('disconnect-me', (cb?: Function) => {
-  try {
-    handelDisconnect(socket.id, roomArr, io);
-    if (online > 0) {
-      online--;
-      console.log('[SERVER] emit online ->', online);
-      io.emit('online', online);
+    try {
+      // Explicit client-initiated exit: force immediate cleanup so resources
+      // are not held and the user won't be rematched with stale entries.
+      handelDisconnect(socket.id, roomArr, io, true);
+      if (activeSockets.has(socket.id)) activeSockets.delete(socket.id);
+      console.log('[SERVER] emit online ->', activeSockets.size);
+      io.emit('online', activeSockets.size);
+      // Acknowledge the client that disconnect handling is done
+      if (typeof cb === 'function') {
+        try { cb(); } catch (e) {}
+      }
+      // Also emit a named confirmation for clients that listen for it
+      try { socket.emit('disconnect-confirm'); } catch (e) {}
+    } catch (err) {
+      console.error('Error handling disconnect-me:', err);
+      if (typeof cb === 'function') {
+        try { cb(err); } catch (e) {}
+      }
     }
-    // Acknowledge the client that disconnect handling is done
-    if (typeof cb === 'function') {
-      try { cb(); } catch (e) {}
-    }
-    // Also emit a named confirmation for clients that listen for it
-    try { socket.emit('disconnect-confirm'); } catch (e) {}
-  } catch (err) {
-    console.error('Error handling disconnect-me:', err);
-    if (typeof cb === 'function') {
-      try { cb(err); } catch (e) {}
-    }
-  }
 });
 
   // NEXT

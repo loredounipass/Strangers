@@ -52,12 +52,12 @@ const io = new socket_io_1.Server(server, {
     pingTimeout: 10000,
     pingInterval: 5000,
 });
-let online = 0;
+const activeSockets = new Set();
 let roomArr = [];
 io.on('connection', (socket) => {
-    online++;
-    console.log('[SERVER] emit online ->', online);
-    io.emit('online', online);
+    activeSockets.add(socket.id);
+    console.log('[SERVER] emit online ->', activeSockets.size);
+    io.emit('online', activeSockets.size);
     console.log('[SERVER] New socket connected:', socket.id);
     // START (client may provide a persistent clientId to allow reconnection)
     socket.on('start', (clientIdOrCb, cb) => {
@@ -81,24 +81,24 @@ io.on('connection', (socket) => {
             console.error('Error in start handler:', error);
         }
     });
-    // DISCONNECT
+    // DISCONNECT (unexpected network disconnect)
     socket.on('disconnect', () => {
-        (0, lib_1.handelDisconnect)(socket.id, roomArr, io);
-        if (online > 0) {
-            online--;
-            console.log('[SERVER] emit online ->', online);
-            io.emit('online', online);
-        }
+        (0, lib_1.handelDisconnect)(socket.id, roomArr, io, false);
+        if (activeSockets.has(socket.id))
+            activeSockets.delete(socket.id);
+        console.log('[SERVER] emit online ->', activeSockets.size);
+        io.emit('online', activeSockets.size);
     });
     // DISCONNECT-ME
     socket.on('disconnect-me', (cb) => {
         try {
-            (0, lib_1.handelDisconnect)(socket.id, roomArr, io);
-            if (online > 0) {
-                online--;
-                console.log('[SERVER] emit online ->', online);
-                io.emit('online', online);
-            }
+            // Explicit client-initiated exit: force immediate cleanup so resources
+            // are not held and the user won't be rematched with stale entries.
+            (0, lib_1.handelDisconnect)(socket.id, roomArr, io, true);
+            if (activeSockets.has(socket.id))
+                activeSockets.delete(socket.id);
+            console.log('[SERVER] emit online ->', activeSockets.size);
+            io.emit('online', activeSockets.size);
             // Acknowledge the client that disconnect handling is done
             if (typeof cb === 'function') {
                 try {

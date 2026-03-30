@@ -707,20 +707,43 @@ function restartConnection() {
   STATE.type = null;
   STATE.isNegotiating = false;
   
-  STATE.socket.emit('disconnect-me');
-  
-  setTimer('restart', async () => {
+  // Request server to perform disconnect handling and wait for confirmation
+  // to avoid racing with server-side cleanup (which could lead to stale rooms
+  // or device locks). Use a short fallback timeout if server doesn't ack.
+  try {
+    let restarted = false;
+    const doRestart = async () => {
+      if (restarted) return;
+      restarted = true;
+      try {
+        await initMedia();
+      } catch (err) {
+        log('MEDIA', 'Init media failed', err);
+      }
+
+      try {
+        STATE.socket.emit('start', CLIENT_ID, (newType) => {
+          STATE.type = newType;
+        });
+      } catch (e) {
+        log('SOCKET', 'emit start failed during restart', e);
+      }
+    };
+
+    // Listen for server confirmation
     try {
-      await initMedia();
-    } catch (err) {
-      log('MEDIA', 'Init media failed', err);
+      STATE.socket.emit('disconnect-me', () => {
+        doRestart();
+      });
+    } catch (e) {
+      // emit failed, proceed after fallback
     }
-    
-    STATE.socket.emit('start', CLIENT_ID, (newType) => {
-      STATE.type = newType;
-    });
-    
-  }, CONFIG.MAX_RECONNECT_RETRIES);
+
+    // Fallback if server doesn't respond quickly
+    setTimer('restart-fallback', doRestart, 500);
+  } catch (e) {
+    log('SOCKET', 'restartConnection failed', e);
+  }
 }
 
 // ============================================
@@ -768,7 +791,10 @@ function setupSocketEvents() {
       if (STATE.remoteSocket) {
         showNotification('Partner disconnected.');
         setAppState(AppState.IDLE);
-        fullCleanup();
+        // Preserve local media (camera/mic) for the user who remains so they
+        // don't need to refresh the page to continue. Use light cleanup to
+        // close peer and signaling but keep `STATE.localStream` intact.
+        lightCleanup();
         // Do not scheduleReconnect() when the other user intentionally left
         return;
       }
@@ -852,20 +878,26 @@ function setupSocketEvents() {
 function setupUIEvents() {
   DOM.exitBtn.addEventListener('click', () => {
     STATE.isExiting = true;
-    fullCleanup();
-    // Ask server to perform disconnect and wait for confirmation before actually disconnecting socket
+    // Ask server to perform disconnect and wait for confirmation before cleaning up local resources.
     let didAck = false;
     try {
       STATE.socket.emit('disconnect-me', () => {
         didAck = true;
+        try { fullCleanup(); } catch (e) {}
         try { STATE.socket.disconnect(); } catch (e) {}
         window.location.href = '/';
       });
-    } catch (e) {}
+    } catch (e) {
+      // If emit itself fails, still perform cleanup and navigate
+      try { fullCleanup(); } catch (e) {}
+      try { STATE.socket.disconnect(); } catch (e) {}
+      window.location.href = '/';
+    }
 
-    // Fallback: if server doesn't ack within 500ms, force disconnect and navigate
+    // Fallback: if server doesn't ack within 500ms, force cleanup, disconnect and navigate
     setTimeout(() => {
       if (!didAck) {
+        try { fullCleanup(); } catch (e) {}
         try { STATE.socket.disconnect(); } catch (e) {}
         window.location.href = '/';
       }

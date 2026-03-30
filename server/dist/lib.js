@@ -108,9 +108,9 @@ function handelStart(roomArr, socket, clientId, cb, io) {
         return false;
     }
 }
-function handelDisconnect(disconnectedId, roomArr, io) {
-    var _a, _b, _c;
-    // Instead of immediate removal, keep the room for a grace period so client can reconnect
+function handelDisconnect(disconnectedId, roomArr, io, forceCleanup = false) {
+    var _a, _b, _c, _d, _e;
+    // If forceCleanup is true, immediately remove the room entries for this socket.
     for (let i = 0; i < roomArr.length; i++) {
         const room = roomArr[i];
         if (room.p1.id === disconnectedId || ((_a = room.p2) === null || _a === void 0 ? void 0 : _a.id) === disconnectedId) {
@@ -118,6 +118,30 @@ function handelDisconnect(disconnectedId, roomArr, io) {
             const partner = isP1 ? (_b = room.p2) === null || _b === void 0 ? void 0 : _b.id : (_c = room.p1) === null || _c === void 0 ? void 0 : _c.id;
             if (partner)
                 io.to(partner).emit('disconnected');
+            if (forceCleanup) {
+                // Remove the socket id and cleanup the room immediately.
+                if (isP1) {
+                    room.p1.id = null;
+                }
+                else {
+                    room.p2.id = null;
+                }
+                // Clear any pending cleanup timer for this room
+                if (cleanupTimers.has(room.roomid)) {
+                    clearTimeout(cleanupTimers.get(room.roomid));
+                    cleanupTimers.delete(room.roomid);
+                }
+                // If both sides are gone or nobody has clientId, remove room
+                if ((!room.p1.id && !((_d = room.p2) === null || _d === void 0 ? void 0 : _d.id)) || (room.p1.id === null && !room.p1.clientId && !((_e = room.p2) === null || _e === void 0 ? void 0 : _e.id))) {
+                    roomArr.splice(i, 1);
+                    i--; // adjust index after removal
+                }
+                else {
+                    room.isAvailable = true;
+                }
+                continue;
+            }
+            // Non-forced path: keep the room for a grace period so client can reconnect
             // set id to null but preserve clientId and mark lastSeen
             if (isP1) {
                 room.p1.id = null;

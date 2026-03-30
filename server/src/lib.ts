@@ -111,8 +111,8 @@ export function handelStart(roomArr: Array<room>, socket: any, clientId: string 
   }
 }
 
-export function handelDisconnect(disconnectedId: string, roomArr: Array<room>, io: any) {
-  // Instead of immediate removal, keep the room for a grace period so client can reconnect
+export function handelDisconnect(disconnectedId: string, roomArr: Array<room>, io: any, forceCleanup: boolean = false) {
+  // If forceCleanup is true, immediately remove the room entries for this socket.
   for (let i = 0; i < roomArr.length; i++) {
     const room = roomArr[i];
 
@@ -121,6 +121,32 @@ export function handelDisconnect(disconnectedId: string, roomArr: Array<room>, i
       const partner = isP1 ? room.p2?.id : room.p1?.id;
       if (partner) io.to(partner).emit('disconnected');
 
+      if (forceCleanup) {
+        // Remove the socket id and cleanup the room immediately.
+        if (isP1) {
+          room.p1.id = null;
+        } else {
+          room.p2.id = null;
+        }
+
+        // Clear any pending cleanup timer for this room
+        if (cleanupTimers.has(room.roomid)) {
+          clearTimeout(cleanupTimers.get(room.roomid)!);
+          cleanupTimers.delete(room.roomid);
+        }
+
+        // If both sides are gone or nobody has clientId, remove room
+        if ((!room.p1.id && !room.p2?.id) || (room.p1.id === null && !room.p1.clientId && !room.p2?.id)) {
+          roomArr.splice(i, 1);
+          i--; // adjust index after removal
+        } else {
+          room.isAvailable = true;
+        }
+
+        continue;
+      }
+
+      // Non-forced path: keep the room for a grace period so client can reconnect
       // set id to null but preserve clientId and mark lastSeen
       if (isP1) {
         room.p1.id = null;
