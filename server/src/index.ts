@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 import cors from 'cors';
 import { Server, Socket } from 'socket.io';
-import { handelStart, handelDisconnect, getType } from './lib';
+import { handelStart, handelDisconnect, getType, removeFromWaitingQueue, markRoomAsWaiting } from './lib';
 import { GetTypesResult, room } from './types';
 
 const app = express();
@@ -86,6 +86,7 @@ io.on('connection', (socket: Socket) => {
 // DISCONNECT (unexpected network disconnect)
 socket.on('disconnect', () => {
   handelDisconnect(socket.id, roomArr, io, false);
+  removeFromWaitingQueue(socket.id);
   if (activeSockets.has(socket.id)) activeSockets.delete(socket.id);
   console.log('[SERVER] emit online ->', activeSockets.size);
   io.emit('online', activeSockets.size);
@@ -97,6 +98,7 @@ socket.on('disconnect-me', (cb?: Function) => {
       // Explicit client-initiated exit: force immediate cleanup so resources
       // are not held and the user won't be rematched with stale entries.
       handelDisconnect(socket.id, roomArr, io, true);
+      removeFromWaitingQueue(socket.id);
       if (activeSockets.has(socket.id)) activeSockets.delete(socket.id);
       console.log('[SERVER] emit online ->', activeSockets.size);
       io.emit('online', activeSockets.size);
@@ -119,8 +121,14 @@ socket.on('disconnect-me', (cb?: Function) => {
     try {
       const room = roomArr.find(r => r.p1.id === socket.id || r.p2.id === socket.id);
       
-      if (room && (room.p1.id && room.p2.id)) { // Ensure both players are in the room
+      if (room && (room.p1.id && room.p2.id)) {
+        // El otro usuario queda esperando
+        const partnerId = room.p1.id === socket.id ? room.p2.id : room.p1.id;
         handelDisconnect(socket.id, roomArr, io);
+        // Marcar la sala del partner como having waiting
+        if (partnerId) {
+          markRoomAsWaiting(roomArr, partnerId);
+        }
         handelStart(roomArr, socket, undefined, (person: string) => {
           if (socket.connected) {
               console.log('[SERVER] emit start ->', person, 'to', socket.id);
@@ -129,9 +137,6 @@ socket.on('disconnect-me', (cb?: Function) => {
         }, io);
       } else {
           try {
-            // Always disconnect the client from their current room and request a new start.
-            // This lets the server reassign them even if there's no other peer available
-            // (it will be placed in the available queue or matched if possible).
             console.log('[SERVER] next requested by', socket.id);
             try { handelDisconnect(socket.id, roomArr, io); } catch (e) { console.warn('[SERVER] handelDisconnect failed in next', e); }
             handelStart(roomArr, socket, undefined, (person: string) => {
@@ -144,8 +149,6 @@ socket.on('disconnect-me', (cb?: Function) => {
             console.error('Error in next handler:', error);
             socket.emit('error', { message: 'Internal server error in next' });
           }
-
-        
       }
     } catch (error) {
       console.error('Error in leave handler:', error);

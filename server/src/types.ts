@@ -1,6 +1,7 @@
 export interface room {
   roomid: string,
   isAvailable: boolean,
+  hasWaiting: boolean,
   p1: {
     id: string | null,
     clientId?: string | null
