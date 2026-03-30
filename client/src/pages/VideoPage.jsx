@@ -95,6 +95,12 @@ export default function VideoPage() {
 
   // ---- HANDLERS ----
   const handleNext = useCallback(() => {
+    // 1. PRIMERO emitir al server (para que encuentre la room y limpie)
+    try { STATE.socket.emit('next'); } catch (e) {
+      console.error('[SOCKET] emit next failed', e);
+    }
+
+    // 2. LUEGO limpiar localmente
     if (STATE.localStream) {
       const { video } = getStreamTracks(STATE.localStream);
       video.forEach((track) => {
@@ -110,15 +116,13 @@ export default function VideoPage() {
       }
     }
     STATE.isCameraOff = true;
+    STATE.type = null; // Reset para recibir nuevo tipo del server
     setCameraBtnText('ON');
 
     webrtc.lightCleanup();
     STATE.retryCount = 0;
     STATE.isReconnecting = false;
-
-    try { STATE.socket.emit('next'); } catch (e) {
-      console.error('[SOCKET] emit next failed', e);
-    }
+    setSpinnerVisible(true);
     setAppState(AppState.CONNECTING);
   }, [STATE, webrtc, setAppState]);
 

@@ -46,6 +46,12 @@ export function useSocket({
       setAppState(AppState.CONNECTING);
     });
 
+    // Evento 'start' enviado por el server tras NEXT o re-emparejamiento
+    STATE.socket.on('start', (personType) => {
+      STATE.type = personType;
+      console.log(`[SOCKET] Type updated: ${personType}`);
+    });
+
     STATE.socket.on('roomid', (id) => {
       STATE.roomid = id;
       console.log(`[SOCKET] Room: ${id}`);
@@ -80,17 +86,32 @@ export function useSocket({
     });
 
     STATE.socket.on('disconnected', () => {
-      if (!STATE.isExiting) {
-        if (STATE.remoteSocket) {
-          showNotification('Partner disconnected.');
-          setAppState(AppState.IDLE);
-          webrtc.lightCleanup();
-          return;
+      if (STATE.isExiting) return;
+
+      showNotification('Partner disconnected. Searching...');
+      webrtc.lightCleanup();
+      clearMessages();
+      setSpinnerVisible(true);
+      setAppState(AppState.CONNECTING);
+
+      // Re-inicializar media y buscar nueva pareja
+      // El server ya puso a este socket en waitingQueue,
+      // solo necesitamos re-emitir start para que nos matcheen
+      (async () => {
+        try {
+          await initMedia(myVideoRef?.current);
+        } catch (e) {
+          console.warn('[SOCKET] Reinit media failed', e);
         }
-        showNotification('Disconnected. Searching...');
-        setAppState(AppState.DISCONNECTED);
-        webrtc.fullCleanup();
-      }
+        try {
+          STATE.socket.emit('start', getClientId(), (personType) => {
+            STATE.type = personType;
+            console.log(`[SOCKET] Reconnect type: ${personType}`);
+          });
+        } catch (e) {
+          console.error('[SOCKET] Reconnect start failed', e);
+        }
+      })();
     });
 
     STATE.socket.on('media:state', ({ cameraOff, muted }) => {

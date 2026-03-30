@@ -140,9 +140,12 @@ io.on('connection', (socket: Socket) => {
       // 1. Limpiar la room actual (el partner será notificado y puesto en waitingQueue)
       handelDisconnect(socket.id, roomArr, io, true);
 
-      // 2. Buscar nueva pareja
+      // 2. Buscar nueva pareja — enviar el tipo via callback funcional
       handelStart(roomArr, socket, undefined, (person: string) => {
-        // El tipo ya se envía via callback al cliente
+        // Enviar el nuevo tipo al cliente via evento 'start'
+        // El cliente lo usa en onnegotiationneeded para decidir quién hace el offer
+        socket.emit('start', person);
+        console.log(`[SERVER] next -> ${socket.id} assigned type ${person}`);
       }, io);
     } catch (error) {
       console.error('[SERVER] Error in next handler:', error);
