@@ -62,20 +62,17 @@
    ============================================================ */
 @layer components {
 
-  /* html, body base for index page */
-  .page-index html,
-  .page-index body {
-    height: 100%;
-  }
-
-  .page-index body {
+  /* ── INDEX PAGE ROOT WRAPPER (reemplaza html.page-index body) ── */
+  .page-index-root {
     @apply flex items-center justify-center flex-col relative text-center min-h-screen overflow-x-hidden;
     background-color: #000;
     z-index: 1;
+    width: 100%;
+    min-height: 100vh;
   }
 
-  /* Wave background pseudo-element — kept in global CSS because ::before can't use @apply */
-  .page-index body::before {
+  /* Wave background pseudo-element */
+  .page-index-root::before {
     content: "";
     position: fixed;
     bottom: 0;
@@ -89,7 +86,7 @@
     z-index: 0;
   }
 
-  /* .wrapper on index page */
+  /* wrapper centrado dentro de .page-index-root */
   .index-wrapper {
     @apply flex flex-col items-center text-center;
     z-index: 2;
@@ -150,8 +147,8 @@
    ============================================================ */
 @layer components {
 
-  /* Body layout for video page */
-  .page-video body {
+  /* ── VIDEO PAGE ROOT WRAPPER (reemplaza html.page-video body) ── */
+  .page-video-root {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     background-color: #000;
     color: #FFFF00;
@@ -159,8 +156,10 @@
     grid-template-columns: 2fr 1fr;
     gap: 20px;
     height: 100vh;
+    width: 100%;
     overflow: hidden;
     padding: 20px;
+    box-sizing: border-box;
   }
 
   /* Video holder */
@@ -525,7 +524,7 @@
 
   /* Responsive video page — tablet */
   @media only screen and (max-width: 1000px) {
-    .page-video body {
+    .page-video-root {
       display: flex;
       flex-direction: column;
       gap: 15px;
