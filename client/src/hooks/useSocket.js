@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 import { AppState } from './useAppState.js';
 import { getClientId } from './useWebRTC.js';
 
-const SOCKET_URL = 'https://silver-guide-rqr4g6grrjgcqrv-8000.app.github.dev';
+const SOCKET_URL = 'https://ctqkwg7k-8000.use2.devtunnels.ms';
 
 /**
  * useSocket — Inicializa Socket.IO y enlaza todos los eventos del servidor.
@@ -70,7 +70,7 @@ export function useSocket({
             type: STATE.type,
           });
         }
-      } catch (e) {}
+      } catch (e) { }
 
       if (STATE.localStream) {
         webrtc.processPendingMessages();
@@ -96,7 +96,7 @@ export function useSocket({
       if (!video) return;
 
       if (cameraOff) {
-        try { video.pause(); } catch (e) {}
+        try { video.pause(); } catch (e) { }
         video.style.opacity = '0.3';
         video.dataset.cameraOff = '1';
       } else {
@@ -167,7 +167,7 @@ export function useSocket({
         STATE.socket.disconnect();
         STATE.socket = null;
       }
-    } catch (e) {}
+    } catch (e) { }
   }, [STATE]);
 
   return { initSocket, disconnectSocket };
