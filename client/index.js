@@ -85,7 +85,6 @@ const CONFIG = {
   // Increase ICE timeout to allow slower networks / TURN allocation
   // Note: server-side TURN reliability needed for cross-network tests
   ICE_CONNECTION_TIMEOUT: 60000,
-  MAX_VIDEO_PLAY_RETRIES: 5,
   STATS_INTERVAL: 5000,
   QUALITY: {
     high: { maxBitrate: 5000000, minBitrate: 1500000 },
