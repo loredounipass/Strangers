@@ -33,7 +33,7 @@ export default function ChatHolder({
       <div className="messages">
         <div className="wrapper">
           {messages.map((msg) => (
-            <div className="msg" key={msg.id}>
+            <div className={`msg ${msg.isOwn ? 'own-msg' : 'stranger-msg'}`} key={msg.id}>
               <b>{msg.isOwn ? 'You: ' : 'Stranger: '}</b>
               <span>{msg.text}</span>
             </div>

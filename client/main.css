@@ -178,7 +178,7 @@
   /* Remote video (full) */
   #video {
     width: 100%;
-    flex: 1;
+    height: calc(50% - 7.5px);
     background-color: #1a1b23;
     object-fit: cover;
     position: relative;
@@ -195,7 +195,7 @@
     top: auto;
     right: auto;
     width: 100%;
-    flex: 1;
+    height: calc(50% - 7.5px);
     border-radius: 20px;
     object-fit: cover;
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -207,7 +207,7 @@
   @media only screen and (max-width: 600px) {
     #my-video {
       width: 100%;
-      flex: 1;
+      height: calc(50% - 7.5px);
       top: auto;
       right: auto;
     }
@@ -302,14 +302,27 @@
     font-size: 14px;
     line-height: 1.4;
     word-wrap: break-word;
+    word-break: break-word; /* Ensure long continuous words wrap */
+    white-space: pre-wrap; /* Preserve spaces but allow wrapping */
     padding: 12px 18px;
     border-radius: 20px;
-    background: linear-gradient(135deg, #4facfe 0%, #a18cd1 100%);
+    background: rgba(60, 60, 65, 0.6);
     width: fit-content;
     max-width: 85%;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
+    align-self: flex-start;
+  }
+
+  .chat-holder .msg.own-msg {
+    background: linear-gradient(135deg, #4facfe 0%, #a18cd1 100%);
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+  }
+
+  .chat-holder .msg.stranger-msg {
+    border-bottom-left-radius: 4px;
   }
   
   .chat-holder .msg b {
@@ -513,11 +526,11 @@
       gap: 15px;
       padding: 10px;
       height: 100dvh; /* use dynamic viewport height for mobile */
-      overflow-y: auto;
+      overflow: hidden; /* Prevent body scroll */
     }
 
     .video-holder {
-      height: 50vh;
+      height: 45vh;
       width: 100%;
       margin: 0;
       flex-shrink: 0;
@@ -525,10 +538,17 @@
 
     .chat-holder {
       flex: 1;
-      height: auto;
+      height: 0; /* Important for flex-1 scrolling to work */
       width: 100%;
       margin-left: 0;
       margin-bottom: 70px; /* space for fixed controls */
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chat-holder .messages {
+      flex: 1;
+      overflow-y: auto;
     }
 
     .controls {
@@ -556,7 +576,7 @@
   /* Responsive video page — mobile */
   @media only screen and (max-width: 600px) {
     .video-holder {
-      height: 45vh;
+      height: 40vh; /* slightly smaller on very small screens to leave room for chat */
     }
 
     .controls {
