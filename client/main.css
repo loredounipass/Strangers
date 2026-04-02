@@ -80,7 +80,7 @@
   /* ── NAVBAR ── */
   .index-navbar {
     @apply w-full flex justify-center z-50;
-    padding: 5px 0;
+    padding: 2px 0;
     background: rgba(15, 16, 21, 0.6);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -89,6 +89,8 @@
   .navbar-container {
     @apply flex items-center justify-between w-full px-6;
     max-width: 1200px;
+    padding-top: 2px;
+    padding-bottom: 2px;
   }
 
   .navbar-logo {
@@ -96,12 +98,12 @@
   }
 
   .navbar-logo img {
-    height: 140px;
+    height: 180px;
     width: auto;
     filter: drop-shadow(0 2px 8px rgba(0,0,0,0.3));
     transition: transform 0.3s ease;
-    margin-top: -20px;
-    margin-bottom: -20px;
+    margin-top: -25px;
+    margin-bottom: -25px;
   }
   
   .navbar-logo img:hover {
@@ -109,7 +111,10 @@
   }
 
   .navbar-links {
-    @apply flex gap-6;
+    @apply flex gap-3;
+    margin-left: -20px;
+    margin-top: -15px;
+    padding-bottom: 5px;
   }
 
   .navbar-links a {
@@ -241,13 +246,13 @@
   /* Start button on index page */
   .btn-start {
     @apply font-bold cursor-pointer;
-    padding: 12px 30px;
-    font-size: 15px;
+    padding: 10px 24px;
+    font-size: 13px;
     color: #ffffff;
     border: none;
     border-radius: 30px;
     background: linear-gradient(135deg, #4facfe 0%, #a18cd1 100%);
-    min-width: 180px;
+    min-width: 160px;
     transition: all 0.3s ease;
     box-shadow: 0 8px 20px rgba(79, 172, 254, 0.4);
     letter-spacing: 1px;
@@ -277,8 +282,8 @@
     }
 
     .btn-start {
-      font-size: 16px;
-      padding: 14px 30px;
+      font-size: 12px;
+      padding: 10px 24px;
       min-width: 100%;
     }
   }
@@ -1243,14 +1248,14 @@
     background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
     color: #fff;
     border: none;
-    padding: 14px 40px;
-    font-size: 1rem;
+    padding: 10px 24px;
+    font-size: 13px;
     font-weight: 600;
     border-radius: 12px;
     cursor: pointer;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
     flex: 1;
-    max-width: 200px;
+    max-width: 160px;
   }
 
   .btn-start:hover {
