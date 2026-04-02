@@ -32,6 +32,11 @@ export default function HomePage() {
       {/* Animated Background */}
       <div className="home-bg-gradient"></div>
       <div className="home-bg-grid"></div>
+      <div className="home-floating-orbs">
+        <div className="orb orb-1"></div>
+        <div className="orb orb-2"></div>
+        <div className="orb orb-3"></div>
+      </div>
 
       {/* Navigation */}
       <nav className={`home-nav ${isScrolled ? 'hidden' : ''}`}>
@@ -51,59 +56,36 @@ export default function HomePage() {
       <main className="home-main">
         <section className="home-hero">
           <div className={`home-hero-content ${isLoaded ? 'loaded' : ''}`}>
-            <h1 className="hero-title">
-              <span className="title-line">Conecta con</span>
-              <span className="title-gradient">Personas del Mundo</span>
-            </h1>
-            
-            <p className="hero-subtitle">
-              Experimenta conversaciones auténticas con personas aleatorias de todo el mundo. 
-              Sin registros, sin complicaciones, solo conexión humana real.
-            </p>
+            <div className="hero-text-container">
+              <span className="hero-eyebrow">Plataforma de Video Chat</span>
+              
+              <h1 className="hero-title">
+                <span className="title-accent">Conecta</span>
+                <span className="title-with">con</span>
+                <span className="title-highlight">Personas del Mundo</span>
+              </h1>
+              
+              <p className="hero-subtitle">
+                Experimenta conversaciones auténticas con personas aleatorias de todo el mundo. 
+                Sin registros, sin complicaciones, solo conexión humana real.
+              </p>
 
-            <div className="hero-cta">
-              <button className="home-btn-primary" onClick={handleStart}>
-                <span>Comenzar Ahora</span>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M5 12h14"/>
-                  <path d="M12 5l7 7-7 7"/>
-                </svg>
-              </button>
-              <button className="home-btn-secondary">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-                <span>Ver Demo</span>
-              </button>
+              <div className="hero-cta">
+                <button className="home-btn-primary" onClick={handleStart}>
+                  <span>Comenzar Ahora</span>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M5 12h14"/>
+                    <path d="M12 5l7 7-7 7"/>
+                  </svg>
+                </button>
+              </div>
             </div>
 
-            <div className="hero-stats">
-              <div className="stat">
-                <span className="stat-number">10K+</span>
-                <span className="stat-label">Usuarios Activos</span>
-              </div>
-              <div className="stat">
-                <span className="stat-number">50+</span>
-                <span className="stat-label">Países</span>
-              </div>
-              <div className="stat">
-                <span className="stat-number">1M+</span>
-                <span className="stat-label">Conexiones</span>
-              </div>
-            </div>
-          </div>
-
-          <div className={`home-hero-visual ${isLoaded ? 'loaded' : ''}`}>
-            <div className="visual-card">
-              <div className="visual-placeholder">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                  <circle cx="12" cy="13" r="4"/>
-                </svg>
-                <span>Vista previa de cámara</span>
-              </div>
-              <div className="visual-overlay">
-                <div className="overlay-badge">HD</div>
+            <div className="hero-wave-container">
+              <div className="hero-wave">
+                {[...Array(20)].map((_, i) => (
+                  <div key={i} className="wave-bar" style={{ animationDelay: `${i * 0.1}s` }}></div>
+                ))}
               </div>
             </div>
           </div>
@@ -227,20 +209,6 @@ export default function HomePage() {
                 Nuestra plataforma facilita conexiones genuinas entre personas de diferentes culturas,
                 países y backgrounds, creando un espacio donde las barreras desaparecen y la comunicación fluye libremente.
               </p>
-            </div>
-            <div className="about-stats">
-              <div className="about-stat">
-                <span className="stat-number">2024</span>
-                <span className="stat-label">Año de Fundación</span>
-              </div>
-              <div className="about-stat">
-                <span className="stat-number">50+</span>
-                <span className="stat-label">Países Conectados</span>
-              </div>
-              <div className="about-stat">
-                <span className="stat-number">100%</span>
-                <span className="stat-label">Privado y Seguro</span>
-              </div>
             </div>
           </div>
         </section>
