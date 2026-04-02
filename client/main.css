@@ -391,6 +391,28 @@
     transform: scale(1.45);
   }
 
+  /* Back button in sidebar */
+  .sidebar-back-btn {
+    margin-top: auto;
+    margin: auto 10px 15px 10px;
+    padding: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #a0a0a8;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+  }
+
+  .sidebar-back-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
   /* Video holder */
   .video-holder {
     position: relative;

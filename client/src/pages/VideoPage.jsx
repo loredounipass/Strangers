@@ -136,6 +136,30 @@ export default function VideoPage() {
     }, 500);
   }, [STATE, webrtc, disconnectSocket, navigate]);
 
+  const handleBack = useCallback(() => {
+    STATE.isExiting = true;
+    let didAck = false;
+
+    const cleanup = () => {
+      try { webrtc.fullCleanup(); } catch (e) {}
+      try { disconnectSocket(); } catch (e) {}
+      navigate('/checking');
+    };
+
+    try {
+      STATE.socket.emit('disconnect-me', () => {
+        didAck = true;
+        cleanup();
+      });
+    } catch (e) {
+      cleanup();
+    }
+
+    setTimeout(() => {
+      if (!didAck) cleanup();
+    }, 500);
+  }, [STATE, webrtc, disconnectSocket, navigate]);
+
   const handleCamera = useCallback(() => {
     toggleCamera(myVideoRef.current, setCameraBtnText);
   }, [toggleCamera]);
@@ -180,6 +204,9 @@ export default function VideoPage() {
           <div className="sidebar-logo">
             <img src="/assets/cosmogle.png" alt="Logo" />
           </div>
+          <button className="sidebar-back-btn" onClick={handleBack}>
+            Atrás
+          </button>
         </div>
 
         <VideoHolder
