@@ -4,9 +4,23 @@ import { useState, useEffect } from 'react';
 export default function HomePage() {
   const navigate = useNavigate();
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
     setIsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 50) {
+        setIsScrolled(true);
+      } else {
+        setIsScrolled(false);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
   function handleStart() {
@@ -20,14 +34,15 @@ export default function HomePage() {
       <div className="home-bg-grid"></div>
 
       {/* Navigation */}
-      <nav className="home-nav">
+      <nav className={`home-nav ${isScrolled ? 'hidden' : ''}`}>
         <div className="home-nav-container">
           <div className="home-logo">
             <img src="/assets/cosmogle.png" alt="Cosmogle" />
           </div>
           <div className="home-nav-links">
+            <a href="#about">About Cosmogle</a>
             <a href="#features">Características</a>
-            <a href="#how-it-works">Cómo Funciona</a>
+            <a href="#contact">Contacto</a>
           </div>
         </div>
       </nav>
@@ -195,6 +210,83 @@ export default function HomePage() {
                 <h3>Conecta y Chatea</h3>
                 <p>Te emparejamos automáticamente con alguien para conversar.</p>
               </div>
+            </div>
+          </div>
+        </section>
+
+        {/* About Section */}
+        <section id="about" className="home-about">
+          <div className="section-header">
+            <h2>About Cosmogle</h2>
+            <p>Conoce más sobre nuestra plataforma</p>
+          </div>
+
+          <div className="about-content">
+            <div className="about-text">
+              <h3>Nuestra Misión</h3>
+              <p>
+                Cosmogle nació de la idea de conectar personas de todo el mundo a través de conversaciones auténticas.
+                Creemos que cada persona tiene una historia que contar y experiencias que compartir.
+              </p>
+              <p>
+                Nuestra plataforma facilita conexiones genuinas entre personas de diferentes culturas,
+                países y backgrounds, creando un espacio donde las barreras desaparecen y la comunicación fluye libremente.
+              </p>
+            </div>
+            <div className="about-stats">
+              <div className="about-stat">
+                <span className="stat-number">2024</span>
+                <span className="stat-label">Año de Fundación</span>
+              </div>
+              <div className="about-stat">
+                <span className="stat-number">50+</span>
+                <span className="stat-label">Países Conectados</span>
+              </div>
+              <div className="about-stat">
+                <span className="stat-number">100%</span>
+                <span className="stat-label">Privado y Seguro</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Contact Section */}
+        <section id="contact" className="home-contact">
+          <div className="section-header">
+            <h2>Contacto</h2>
+            <p>¿Tienes preguntas? Estamos aquí para ayudarte</p>
+          </div>
+
+          <div className="contact-content">
+            <div className="contact-card">
+              <div className="contact-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                  <polyline points="22,6 12,13 2,6"/>
+                </svg>
+              </div>
+              <h3>Email</h3>
+              <p>support@cosmogle.com</p>
+            </div>
+
+            <div className="contact-card">
+              <div className="contact-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+                </svg>
+              </div>
+              <h3>Chat en Vivo</h3>
+              <p>Disponible 24/7</p>
+            </div>
+
+            <div className="contact-card">
+              <div className="contact-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/>
+                </svg>
+              </div>
+              <h3>Privacidad</h3>
+              <p>Tu información está segura</p>
             </div>
           </div>
         </section>
