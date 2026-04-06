@@ -1,76 +1,77 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Server, Socket } from 'socket.io';
 import type { Room, PeerRole, PeerInfo, GetTypesResult } from './types';
+import { redisState } from './redisState';
+import { isRedisConnected } from './redis';
+import { logger, LogChannel } from './logger';
 
-// ============================================
-// ROOM MANAGER — Gestión centralizada de salas
-// ============================================
+const useRedis = (): boolean => isRedisConnected();
 
-/** Map<roomId, Room> — O(1) lookup */
 const rooms = new Map<string, Room>();
-
-/** Map<socketId, roomId> — reverse index para encontrar la room de un socket en O(1) */
 const socketToRoom = new Map<string, string>();
-
-/** Cola de sockets buscando pareja — FIFO estricta */
 const waitingQueue: string[] = [];
 
-// ============================================
-// HELPERS
-// ============================================
-
-function log(tag: string, msg: string, data?: any) {
-  console.log(`[${tag}] ${msg}`, data !== undefined ? data : '');
-}
-
-/** Verifica si un socket sigue conectado al server */
 function isSocketAlive(io: Server, socketId: string): boolean {
   return io.sockets.sockets.has(socketId);
 }
 
-/** Limpia sockets muertos de la waitingQueue */
 function pruneWaitingQueue(io: Server): void {
   for (let i = waitingQueue.length - 1; i >= 0; i--) {
     if (!isSocketAlive(io, waitingQueue[i])) {
-      log('QUEUE', 'Pruned dead socket from waiting queue', waitingQueue[i]);
+      const removed = waitingQueue[i];
       waitingQueue.splice(i, 1);
+      logger.info(LogChannel.QUEUE, 'Pruned dead socket from waiting queue', { socketId: removed });
+      
+      if (useRedis()) {
+        redisState.removeFromWaitingQueue(removed);
+      }
     }
   }
 }
 
-/** Agrega un socket a la cola de espera (si no está ya) */
 function addToWaitingQueue(socketId: string): void {
   if (!waitingQueue.includes(socketId)) {
     waitingQueue.push(socketId);
-    log('QUEUE', `Added ${socketId}. Queue size: ${waitingQueue.length}`);
+    logger.info(LogChannel.QUEUE, `Added ${socketId} to waiting queue`, { queueSize: waitingQueue.length });
+    
+    if (useRedis()) {
+      redisState.addToWaitingQueue(socketId);
+    }
   }
 }
 
-/** Elimina un socket de la cola de espera */
 export function removeFromWaitingQueue(socketId: string): void {
   const idx = waitingQueue.indexOf(socketId);
   if (idx !== -1) {
     waitingQueue.splice(idx, 1);
-    log('QUEUE', `Removed ${socketId}. Queue size: ${waitingQueue.length}`);
+    logger.info(LogChannel.QUEUE, `Removed ${socketId} from waiting queue`, { queueSize: waitingQueue.length });
+  }
+  
+  if (useRedis()) {
+    redisState.removeFromWaitingQueue(socketId);
   }
 }
 
-/** Toma el primer socket válido de la cola */
-function takeFromWaitingQueue(io: Server, excludeId?: string): string | null {
+async function takeFromWaitingQueueAsync(io: Server, excludeId?: string): Promise<string | null> {
+  if (useRedis()) {
+    const taken = await redisState.takeFromWaitingQueue(excludeId);
+    if (taken) {
+      logger.info(LogChannel.QUEUE, 'Took socket from Redis queue', { taken, excluded: excludeId });
+    }
+    return taken;
+  }
+  
   pruneWaitingQueue(io);
   for (let i = 0; i < waitingQueue.length; i++) {
     const id = waitingQueue[i];
     if (id !== excludeId && isSocketAlive(io, id)) {
       waitingQueue.splice(i, 1);
+      logger.info(LogChannel.QUEUE, 'Took socket from memory queue', { taken: id, excluded: excludeId });
       return id;
     }
   }
   return null;
 }
-
-// ============================================
-// ROOM OPERATIONS
-// ============================================
 
 function createRoom(socketId: string, clientId: string | null): Room {
   const roomId = uuidv4();
@@ -82,24 +83,66 @@ function createRoom(socketId: string, clientId: string | null): Room {
   };
   rooms.set(roomId, room);
   socketToRoom.set(socketId, roomId);
-  log('ROOM', `Created room ${roomId} with p1=${socketId}`);
+  
+  logger.info(LogChannel.ROOM, `Created room ${roomId}`, { 
+    p1: socketId, 
+    clientId,
+    totalRooms: rooms.size 
+  });
+  
+  if (useRedis()) {
+    redisState.createRoom(roomId, socketId, clientId);
+  }
+  
   return room;
 }
 
-function destroyRoom(roomId: string): void {
+async function destroyRoomAsync(roomId: string): Promise<void> {
   const room = rooms.get(roomId);
-  if (!room) return;
+  if (!room) {
+    logger.warn(LogChannel.ROOM, 'Room not found for destruction', { roomId });
+    return;
+  }
 
-  if (room.p1) socketToRoom.delete(room.p1.socketId);
-  if (room.p2) socketToRoom.delete(room.p2.socketId);
+  if (room.p1) {
+    socketToRoom.delete(room.p1.socketId);
+    logger.debug(LogChannel.ROOM, 'Removed socket mapping', { socketId: room.p1.socketId, role: 'p1' });
+  }
+  if (room.p2) {
+    socketToRoom.delete(room.p2.socketId);
+    logger.debug(LogChannel.ROOM, 'Removed socket mapping', { socketId: room.p2.socketId, role: 'p2' });
+  }
   rooms.delete(roomId);
-  log('ROOM', `Destroyed room ${roomId}`);
+  
+  logger.info(LogChannel.ROOM, `Destroyed room ${roomId}`, { 
+    hadP1: !!room.p1, 
+    hadP2: !!room.p2,
+    totalRooms: rooms.size 
+  });
+  
+  if (useRedis()) {
+    await redisState.destroyRoom(roomId);
+  }
 }
 
-function getRoomBySocket(socketId: string): Room | null {
+async function getRoomBySocketAsync(socketId: string): Promise<Room | null> {
+  if (useRedis()) {
+    const room = await redisState.getRoomBySocket(socketId);
+    if (room) {
+      logger.debug(LogChannel.ROOM, 'Found room in Redis', { socketId, roomId: room.roomId });
+    }
+    return room;
+  }
+  
   const roomId = socketToRoom.get(socketId);
-  if (!roomId) return null;
-  return rooms.get(roomId) || null;
+  if (!roomId) {
+    logger.debug(LogChannel.ROOM, 'No room mapping for socket', { socketId });
+    return null;
+  }
+  
+  const room = rooms.get(roomId) || null;
+  logger.debug(LogChannel.ROOM, 'Found room in memory', { socketId, roomId, found: !!room });
+  return room;
 }
 
 function getRoleInRoom(socketId: string, room: Room): PeerRole | null {
@@ -114,89 +157,92 @@ function getPartnerInRoom(socketId: string, room: Room): string | null {
   return null;
 }
 
-// ============================================
-// MATCHMAKING
-// ============================================
-
-function matchPeers(io: Server, p1Socket: Socket, p2Socket: Socket, p1ClientId: string | null, p2ClientId: string | null): Room {
-  // Buscar room existente de p1 (creada cuando p1 entró a la cola)
-  let room = getRoomBySocket(p1Socket.id);
+async function matchPeersAsync(
+  io: Server,
+  p1Socket: Socket,
+  p2Socket: Socket,
+  p1ClientId: string | null,
+  p2ClientId: string | null
+): Promise<Room> {
+  let room = await getRoomBySocketAsync(p1Socket.id);
 
   if (!room) {
-    // Fallback: crear room nueva si p1 no tenía (no debería pasar)
+    logger.warn(LogChannel.MATCH, 'No existing room for p1, creating new', { p1: p1Socket.id });
     room = createRoom(p1Socket.id, p1ClientId);
     p1Socket.join(room.roomId);
   }
 
-  // Asignar p2 a la room existente de p1
   room.p2 = { socketId: p2Socket.id, clientId: p2ClientId };
   socketToRoom.set(p2Socket.id, room.roomId);
+  rooms.set(room.roomId, room);
+  
+  logger.info(LogChannel.MATCH, `Matched peers in room ${room.roomId}`, {
+    p1: p1Socket.id,
+    p2: p2Socket.id,
+    p1ClientId,
+    p2ClientId
+  });
 
-  // p2 se une a la room de Socket.IO (p1 ya está unido desde createRoom)
+  if (useRedis()) {
+    await redisState.addPeerToRoom(room.roomId, p2Socket.id, p2ClientId, 'p2');
+  }
+
   p2Socket.join(room.roomId);
 
-  // Enviar roomid a AMBOS peers
   p1Socket.emit('roomid', room.roomId);
   p2Socket.emit('roomid', room.roomId);
 
-  // Enviar remote-socket a ambos para que creen peer connection
   p1Socket.emit('remote-socket', p2Socket.id);
   p2Socket.emit('remote-socket', p1Socket.id);
 
-  // Confirmar tipo a p1 (por si viene de NEXT y necesita actualización)
   p1Socket.emit('start', 'p1');
 
-  log('MATCH', `Paired ${p1Socket.id} (p1) <-> ${p2Socket.id} (p2) in room ${room.roomId}`);
+  logger.info(LogChannel.MATCH, `Paired ${p1Socket.id} (p1) <-> ${p2Socket.id} (p2)`, { roomId: room.roomId });
+  
   return room;
 }
 
-// ============================================
-// PUBLIC API
-// ============================================
-
-/**
- * handelStart — Maneja el evento `start` de un cliente.
- * 
- * Flujo:
- * 1. Limpiar rooms previas del socket (si refresh)
- * 2. Buscar alguien en la waitingQueue
- * 3. Si hay match → emparejar inmediatamente
- * 4. Si no → crear room y esperar en la cola
- */
-export function handelStart(
-  _roomArr: Room[], // deprecated — usamos el Map interno
+export async function handelStart(
+  _roomArr: Room[],
   socket: Socket,
   clientId: string | undefined,
   cb: (role: PeerRole) => void,
   io: Server
-): void {
+): Promise<void> {
   const cid = clientId || null;
-  log('START', `Socket ${socket.id} requesting start, clientId=${cid}`);
+  
+  logger.info(LogChannel.SOCKET, 'Received start event', { 
+    socketId: socket.id, 
+    clientId: cid,
+    hasRoom: !!socketToRoom.get(socket.id)
+  });
 
-  // 1. Limpiar cualquier room previa de este socket (por si recargó la página)
-  cleanupSocket(socket.id, io, true);
+  await cleanupSocketAsync(socket.id, io, true);
 
-  // 2. Buscar alguien esperando en la cola
-  const waitingId = takeFromWaitingQueue(io, socket.id);
+  const waitingId = await takeFromWaitingQueueAsync(io, socket.id);
 
   if (waitingId) {
-    // 3a. HAY alguien esperando → match inmediato
+    logger.info(LogChannel.MATCH, 'Found match in queue', { 
+      waitingSocket: waitingId, 
+      newSocket: socket.id 
+    });
+    
     const waitingSocket = io.sockets.sockets.get(waitingId);
     if (!waitingSocket) {
-      // Socket murió entre el queue y ahora — volver a intentar
-      log('START', `Waiting socket ${waitingId} died, retrying...`);
+      logger.warn(LogChannel.MATCH, 'Waiting socket disconnected, retrying', { waitingSocket: waitingId });
       return handelStart(_roomArr, socket, clientId, cb, io);
     }
 
-    const room = matchPeers(io, waitingSocket, socket, null, cid);
+    await matchPeersAsync(io, waitingSocket, socket, null, cid);
 
-    // p1 (el que esperaba) ya tiene su callback ejecutado cuando entró a la cola
-    // p2 (el nuevo) recibe su rol ahora
     cb('p2');
 
-    log('START', `Matched ${waitingId} (p1) with ${socket.id} (p2)`);
+    logger.info(LogChannel.MATCH, 'Match completed', { 
+      p1: waitingId, 
+      p2: socket.id,
+      role: 'p2'
+    });
   } else {
-    // 3b. Nadie esperando → crear room y entrar a la cola
     const room = createRoom(socket.id, cid);
     socket.join(room.roomId);
     socket.emit('roomid', room.roomId);
@@ -204,109 +250,152 @@ export function handelStart(
     cb('p1');
     addToWaitingQueue(socket.id);
 
-    log('START', `${socket.id} waiting as p1 in room ${room.roomId}`);
+    logger.info(LogChannel.MATCH, 'Socket waiting for match', { 
+      socketId: socket.id,
+      roomId: room.roomId,
+      role: 'p1',
+      queueSize: waitingQueue.length
+    });
   }
 }
 
-/**
- * handelDisconnect — Maneja desconexión de un peer.
- * 
- * 1. Notifica al partner
- * 2. Limpia la room
- * 3. El partner se mete en waitingQueue para ser re-emparejado
- */
-export function handelDisconnect(
+export async function handelDisconnect(
   disconnectedId: string,
-  _roomArr: Room[], // deprecated
+  _roomArr: Room[],
   io: Server,
   forceCleanup: boolean = false
-): void {
-  cleanupSocket(disconnectedId, io, forceCleanup);
+): Promise<void> {
+  logger.info(LogChannel.SOCKET, 'Processing disconnect', { 
+    socketId: disconnectedId,
+    forceCleanup 
+  });
+  
+  await cleanupSocketAsync(disconnectedId, io, forceCleanup);
 }
 
-/**
- * cleanupSocket — Limpia todas las rooms y colas asociadas a un socket.
- */
-function cleanupSocket(socketId: string, io: Server, notifyPartner: boolean = true): void {
+async function cleanupSocketAsync(socketId: string, io: Server, notifyPartner: boolean = true): Promise<void> {
   removeFromWaitingQueue(socketId);
 
-  const room = getRoomBySocket(socketId);
-  if (!room) return;
+  const room = await getRoomBySocketAsync(socketId);
+  if (!room) {
+    logger.debug(LogChannel.ROOM, 'No room found for disconnecting socket', { socketId });
+    return;
+  }
 
   const partnerId = getPartnerInRoom(socketId, room);
 
-  // Notificar al partner si corresponde
   if (notifyPartner && partnerId && isSocketAlive(io, partnerId)) {
     io.to(partnerId).emit('disconnected');
-    log('CLEANUP', `Notified partner ${partnerId} about ${socketId} leaving`);
+    logger.info(LogChannel.SOCKET, 'Notified partner of disconnect', { 
+      disconnected: socketId,
+      partner: partnerId 
+    });
   }
 
-  // Limpiar reverse index del partner
   if (partnerId) {
     socketToRoom.delete(partnerId);
-    // NO poner al partner en waitingQueue aquí.
-    // El client recibirá 'disconnected' y emitirá 'start' de nuevo,
-    // que llamará a handelStart() y lo pondrá en la cola correctamente.
+    logger.debug(LogChannel.ROOM, 'Cleared partner socket mapping', { partnerId });
   }
 
-  // Destruir la room completa
-  destroyRoom(room.roomId);
+  await destroyRoomAsync(room.roomId);
 }
 
-/**
- * getType — Retorna el tipo (p1/p2) y el partnerId de un socket.
- * Usado para routear SDP/ICE al peer correcto.
- */
-export function getType(socketId: string, _roomArr: Room[]): GetTypesResult {
-  const room = getRoomBySocket(socketId);
-  if (!room) return false;
+export async function getType(socketId: string, _roomArr: Room[]): Promise<GetTypesResult> {
+  const room = await getRoomBySocketAsync(socketId);
+  if (!room) {
+    logger.debug(LogChannel.ROOM, 'getType: No room found', { socketId });
+    return false;
+  }
 
   const role = getRoleInRoom(socketId, room);
-  if (!role) return false;
+  if (!role) {
+    logger.warn(LogChannel.ROOM, 'getType: Socket not in room', { socketId, roomId: room.roomId });
+    return false;
+  }
 
   const partnerId = getPartnerInRoom(socketId, room);
+  
+  logger.debug(LogChannel.ROOM, 'getType result', { 
+    socketId, 
+    roomId: room.roomId, 
+    role, 
+    partnerId 
+  });
+  
   return { type: role, partnerId, roomId: room.roomId };
 }
 
-/**
- * markRoomAsWaiting — Ya no necesario con la nueva arquitectura.
- * Se mantiene como stub para compatibilidad.
- */
 export function markRoomAsWaiting(_roomArr: Room[], socketId: string): void {
-  // No-op: la nueva lógica maneja waiting automáticamente
+  addToWaitingQueue(socketId);
 }
 
-// ============================================
-// PERIODIC CLEANUP — Limpieza de rooms zombie
-// ============================================
-
-const ZOMBIE_ROOM_TIMEOUT = 60_000; // 60 segundos
-
-setInterval(() => {
+setInterval(async () => {
   const now = Date.now();
-  for (const [roomId, room] of rooms) {
-    const hasP1 = room.p1 !== null;
-    const hasP2 = room.p2 !== null;
+  let roomsChecked = 0;
+  let roomsDestroyed = 0;
+  
+  if (useRedis()) {
+    const redisRooms = await redisState.getAllRooms();
+    for (const [roomId, room] of redisRooms) {
+      roomsChecked++;
+      const hasP1 = room.p1 !== null;
+      const hasP2 = room.p2 !== null;
 
-    // Room vacía = zombie
-    if (!hasP1 && !hasP2) {
-      destroyRoom(roomId);
-      continue;
+      if (!hasP1 && !hasP2) {
+        await redisState.destroyRoom(roomId);
+        roomsDestroyed++;
+        continue;
+      }
+
+      if (now - room.createdAt > 60_000) {
+        if (hasP1 && !hasP2) {
+          const queue = await redisState.getWaitingQueue();
+          if (!queue.includes(room.p1!.socketId)) {
+            await redisState.destroyRoom(roomId);
+            roomsDestroyed++;
+          }
+        }
+      }
     }
+  } else {
+    for (const [roomId, room] of rooms) {
+      roomsChecked++;
+      const hasP1 = room.p1 !== null;
+      const hasP2 = room.p2 !== null;
 
-    // Room vieja con solo un peer que ya no está en la cola = zombie
-    if (now - room.createdAt > ZOMBIE_ROOM_TIMEOUT) {
-      if (hasP1 && !hasP2 && !waitingQueue.includes(room.p1!.socketId)) {
-        destroyRoom(roomId);
+      if (!hasP1 && !hasP2) {
+        destroyRoomAsync(roomId);
+        roomsDestroyed++;
+        continue;
+      }
+
+      if (now - room.createdAt > 60_000) {
+        if (hasP1 && !hasP2 && !waitingQueue.includes(room.p1!.socketId)) {
+          destroyRoomAsync(roomId);
+          roomsDestroyed++;
+        }
       }
     }
   }
+  
+  if (roomsDestroyed > 0) {
+    logger.info(LogChannel.ROOM, 'Zombie cleanup completed', { roomsChecked, roomsDestroyed });
+  }
 }, 30_000);
 
-// ============================================
-// DEBUG — Logs de estado cada 30 segundos
-// ============================================
-
 setInterval(() => {
-  log('STATE', `Rooms: ${rooms.size}, WaitingQueue: ${waitingQueue.length}, SocketMap: ${socketToRoom.size}`);
+  if (useRedis()) {
+    redisState.getWaitingQueueSize().then(size => {
+      logger.debug(LogChannel.STATE, 'State report (Redis)', { 
+        waitingQueue: size,
+        inMemoryRooms: rooms.size
+      });
+    });
+  } else {
+    logger.debug(LogChannel.STATE, 'State report (Memory)', { 
+      rooms: rooms.size,
+      waitingQueue: waitingQueue.length,
+      socketMap: socketToRoom.size
+    });
+  }
 }, 30_000);

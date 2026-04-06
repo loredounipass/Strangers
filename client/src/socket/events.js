@@ -1,5 +1,9 @@
 // Socket Events Module
 
+function isValidRoom(STATE, roomid) {
+  return STATE && STATE.roomid && STATE.roomid === roomid && STATE.roomid.length > 0;
+}
+
 export function setupSocketEvents(socket, handlers = {}) {
   const {
     onConnect,
@@ -11,12 +15,19 @@ export function setupSocketEvents(socket, handlers = {}) {
     onSdpReply,
     onIceReply,
     onMessage,
-    onTyping
+    onTyping,
+    onError,
+    STATE
   } = handlers;
   
   socket.on('connect', () => {
     console.log('[SOCKET] connected', socket.id);
     if (onConnect) onConnect();
+  });
+
+  socket.on('error', (data) => {
+    console.error('[SOCKET] error from server:', data);
+    if (onError) onError(data);
   });
   
   socket.on('start', (personType) => {
@@ -81,7 +92,6 @@ export function emitStart(socket, clientIdOrCallback, callback) {
     return;
   }
 
-  // clientId provided
   console.log('[SOCKET] emit start ->', typeof clientIdOrCallback === 'string' ? '[clientId]' : '[cb]');
   socket.emit('start', clientIdOrCallback, callback);
 }
@@ -91,11 +101,58 @@ export function emitDisconnectMe(socket) {
   socket.emit('disconnect-me');
 }
 
-export function emitSendMessage(socket, message, userType, roomid) {
-  socket.emit('send-message', message, userType, roomid);
+export function emitSendMessage(STATE, socket, message, userType, roomid) {
+  if (!isValidRoom(STATE, roomid)) {
+    console.warn('[SOCKET] emit send-message: invalid roomid', { provided: roomid, current: STATE?.roomid });
+    return;
+  }
+  
+  const sanitized = typeof message === 'string' ? message.slice(0, 1000).replace(/[<>]/g, '') : '';
+  if (!sanitized) {
+    console.warn('[SOCKET] emit send-message: empty message');
+    return;
+  }
+  
+  console.log('[SOCKET] emit send-message ->', { roomid, length: sanitized.length });
+  socket.emit('send-message', sanitized, userType, roomid);
 }
 
-export function emitTyping(socket, roomid, isTyping) {
-  console.log('[SOCKET] emit typing ->', roomid, isTyping);
+export function emitTyping(STATE, socket, roomid, isTyping) {
+  if (!isValidRoom(STATE, roomid)) {
+    console.warn('[SOCKET] emit typing: invalid roomid');
+    return;
+  }
+  
+  if (typeof isTyping !== 'boolean') {
+    console.warn('[SOCKET] emit typing: invalid isTyping value');
+    return;
+  }
+  
+  console.log('[SOCKET] emit typing ->', { roomid, isTyping });
   socket.emit('typing', { roomid, isTyping });
+}
+
+export function emitMediaState(STATE, socket, roomid, cameraOff, muted, type) {
+  if (!isValidRoom(STATE, roomid)) {
+    console.warn('[SOCKET] emit media:state: invalid roomid');
+    return;
+  }
+  
+  console.log('[SOCKET] emit media:state ->', { roomid, cameraOff, muted });
+  socket.emit('media:state', {
+    cameraOff: Boolean(cameraOff),
+    muted: Boolean(muted),
+    roomid: roomid,
+    type: type,
+  });
+}
+
+export function emitRenegotiate(STATE, socket, roomid) {
+  if (!isValidRoom(STATE, roomid)) {
+    console.warn('[SOCKET] emit renegotiate: invalid roomid');
+    return;
+  }
+  
+  console.log('[SOCKET] emit renegotiate ->', { roomid });
+  socket.emit('renegotiate');
 }
