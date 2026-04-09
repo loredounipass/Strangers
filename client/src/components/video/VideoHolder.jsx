@@ -5,6 +5,7 @@ import Controls from './Controls.jsx';
 const VideoHolder = forwardRef(function VideoHolder(
   {
     spinnerVisible,
+    appState,
     onNext,
     onMute,
     onExit,
@@ -52,10 +53,15 @@ const VideoHolder = forwardRef(function VideoHolder(
           ref={strangerVideoRef}
           className={getStrangerClasses()}
           onClick={handleStrangerClick}
+          onPlaying={(e) => {
+            // M-04: Unmute after first successful play (browser autoplay requires muted start)
+            if (e.target.muted) e.target.muted = false;
+          }}
         />
 
         <video
           autoPlay
+          playsInline
           muted
           id="my-video"
           ref={myVideoRef}
@@ -73,7 +79,7 @@ const VideoHolder = forwardRef(function VideoHolder(
         cameraBtnText={cameraBtnText}
       />
 
-      <WaitingModal visible={spinnerVisible} />
+      <WaitingModal visible={spinnerVisible} appState={appState} />
     </div>
   );
 });

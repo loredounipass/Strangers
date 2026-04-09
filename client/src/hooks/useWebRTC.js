@@ -28,27 +28,11 @@ function createTimerManager() {
   return { setTimer, clearTimer, clearAllTimers };
 }
 
-// ============================================
-// ICE SERVERS
-// ============================================
-const ICE_SERVERS = [
-  // ── STUN
+// C-04/C-10: ICE servers come from server /ice endpoint.
+// Fallback is STUN-only (public, no credentials exposed in client code).
+const ICE_SERVERS_FALLBACK = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun3.l.google.com:19302' },
-  { urls: 'stun:stun4.l.google.com:19302' },
-
-  // ── Open Relay (Metered) — UDP + TCP + TLS para atravesar cualquier firewall
-  { urls: 'turn:openrelay.metered.ca:80',                username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:3478',              username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:3478?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turns:openrelay.metered.ca:443',              username: 'openrelayproject', credential: 'openrelayproject' },
-
-  // ── Freestun — proveedor de backup
-  { urls: 'turn:freestun.net:3478',  username: 'free', credential: 'free' },
-  { urls: 'turns:freestun.net:5349', username: 'free', credential: 'free' },
 ];
 
 
@@ -115,9 +99,10 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
   // ----------------------------------------
   function attemptPlay() {
     const video = strangerVideoRef?.current;
-    if (!video || !video.srcObject) return;
-
-    video.muted = true;
+    // M-04/H-03: Don't permanently mute the video — we just need autoplay to work
+    // The video element starts muted in JSX; we unmute after first successful play
+    if (!video.srcObject) return;
+    video.muted = true; // needed for autoplay policy
     if (STATE.videoPlayRetries >= 5) {
       log('VIDEO', 'Max retries reached');
       return;
@@ -323,7 +308,9 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
         try { STATE.socket.emit('sdp:send', { sdp: STATE.peer.localDescription }); } catch (e) {}
         log('SDP', 'Answer sent');
       } else if (sdp.type === 'answer') {
-        if (state !== 'have-local-offer' && state !== 'stable') {
+        // M-05: Only accept answer when we have a pending local offer
+        if (state !== 'have-local-offer') {
+          log('SDP', 'Ignoring answer in state: ' + state);
           STATE.pendingSdp = sdp;
           return;
         }
@@ -338,12 +325,16 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
     }
   }
 
-  function processPendingMessages() {
+  // H-05: Use sequential for-of loop instead of forEach for async handleIce
+  async function processPendingMessages() {
     if (!STATE.peer) return;
 
     if (STATE.pendingIceCandidates.length > 0) {
-      STATE.pendingIceCandidates.forEach(handleIce);
+      const candidates = [...STATE.pendingIceCandidates];
       STATE.pendingIceCandidates = [];
+      for (const candidate of candidates) {
+        await handleIce(candidate);
+      }
     }
 
     if (STATE.pendingSdp) {
@@ -352,7 +343,8 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
       if (s.type === 'offer' && st === 'stable') {
         STATE.pendingSdp = null;
         handleSdp(s);
-      } else if (s.type === 'answer' && (st === 'have-local-offer' || st === 'stable')) {
+      } else if (s.type === 'answer' && st === 'have-local-offer') {
+        // M-05: Only process pending answer in have-local-offer state
         STATE.pendingSdp = null;
         handleSdp(s);
       }
@@ -368,7 +360,8 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
       return;
     }
 
-    const iceServers = STATE.iceServers || ICE_SERVERS;
+    // C-04: Use server-provided ICE servers, fallback to STUN-only
+    const iceServers = STATE.iceServers || ICE_SERVERS_FALLBACK;
     STATE.peer = new RTCPeerConnection({
       iceServers,
       iceCandidatePoolSize: 20,
@@ -588,7 +581,10 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
     timers.setTimer('restart-fallback', doRestart, 500);
   }
 
-  return {
+  // C-08: Store functions in refs so the returned object has stable references
+  // This prevents useSocket from re-registering all event listeners on every render
+  const fnsRef = useRef({});
+  fnsRef.current = {
     createPeerConnection,
     createOffer,
     handleSdp,
@@ -599,6 +595,32 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
     restartConnection,
     startStatsMonitoring,
     attemptPlay,
+  };
+
+  /* eslint-disable react-hooks/exhaustive-deps */
+  const stableCreatePeerConnection = useCallback((...args) => fnsRef.current.createPeerConnection(...args), []);
+  const stableCreateOffer = useCallback((...args) => fnsRef.current.createOffer(...args), []);
+  const stableHandleSdp = useCallback((...args) => fnsRef.current.handleSdp(...args), []);
+  const stableHandleIce = useCallback((...args) => fnsRef.current.handleIce(...args), []);
+  const stableProcessPendingMessages = useCallback((...args) => fnsRef.current.processPendingMessages(...args), []);
+  const stableFullCleanup = useCallback((...args) => fnsRef.current.fullCleanup(...args), []);
+  const stableLightCleanup = useCallback((...args) => fnsRef.current.lightCleanup(...args), []);
+  const stableRestartConnection = useCallback((...args) => fnsRef.current.restartConnection(...args), []);
+  const stableStartStatsMonitoring = useCallback((...args) => fnsRef.current.startStatsMonitoring(...args), []);
+  const stableAttemptPlay = useCallback((...args) => fnsRef.current.attemptPlay(...args), []);
+  /* eslint-enable react-hooks/exhaustive-deps */
+
+  return {
+    createPeerConnection: stableCreatePeerConnection,
+    createOffer: stableCreateOffer,
+    handleSdp: stableHandleSdp,
+    handleIce: stableHandleIce,
+    processPendingMessages: stableProcessPendingMessages,
+    fullCleanup: stableFullCleanup,
+    lightCleanup: stableLightCleanup,
+    restartConnection: stableRestartConnection,
+    startStatsMonitoring: stableStartStatsMonitoring,
+    attemptPlay: stableAttemptPlay,
     CONFIG,
   };
 }

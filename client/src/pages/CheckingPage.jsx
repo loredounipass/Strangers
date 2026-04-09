@@ -39,6 +39,11 @@ export default function CheckingPage() {
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
     }
+    // M-06: Revoke any pending Blob URL on unmount
+    setRecordedAudio((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
   };
 
   const initAudio = async () => {
@@ -158,8 +163,11 @@ export default function CheckingPage() {
 
     mediaRecorder.onstop = () => {
       const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-      const audioUrl = URL.createObjectURL(audioBlob);
-      setRecordedAudio(audioUrl);
+      // M-06: Revoke previous URL before creating new one to avoid memory leak
+      setRecordedAudio((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(audioBlob);
+      });
     };
 
     mediaRecorderRef.current = mediaRecorder;

@@ -7,8 +7,8 @@ dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 import cors from 'cors';
 import { Server, Socket } from 'socket.io';
 import {
-  handelStart,
-  handelDisconnect,
+  handleStart,
+  handleDisconnect,
   getType,
   removeFromWaitingQueue,
   markRoomAsWaiting,
@@ -24,45 +24,59 @@ const app = express();
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(s => s.trim()).filter(Boolean) || [];
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) {
-      logger.debug(LogChannel.CORS, 'Request without origin, allowing', { origin });
-      return callback(null, true);
-    }
-    
-    if (allowedOrigins.includes(origin)) {
-      logger.info(LogChannel.CORS, 'Origin allowed (configured)', { origin });
-      return callback(null, true);
-    }
-    
-    if (origin.endsWith('.app.github.dev') || origin.endsWith('.devtunnels.ms')) {
-      logger.info(LogChannel.CORS, 'Origin allowed (codespaces)', { origin });
-      return callback(null, true);
-    }
-    
-    if (origin.endsWith('.ngrok-free.app') || origin.endsWith('.ngrok.io')) {
-      logger.info(LogChannel.CORS, 'Origin allowed (ngrok)', { origin });
-      return callback(null, true);
-    }
-    
-    if (NODE_ENV === 'development') {
-      if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-        const port = origin.match(/:(\d+)$/)?.[1];
-        if (port && parseInt(port) >= 3000 && parseInt(port) <= 9999) {
-          logger.info(LogChannel.CORS, 'Origin allowed (localhost dev)', { origin, port });
-          return callback(null, true);
-        }
+// ── C-01: Shared origin validation for Express and Socket.IO ──
+function validateOrigin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void): void {
+  if (!origin) {
+    logger.debug(LogChannel.CORS, 'Request without origin, allowing', { origin });
+    return callback(null, true);
+  }
+
+  if (allowedOrigins.includes(origin)) {
+    logger.info(LogChannel.CORS, 'Origin allowed (configured)', { origin });
+    return callback(null, true);
+  }
+
+  if (origin.endsWith('.app.github.dev') || origin.endsWith('.devtunnels.ms')) {
+    logger.info(LogChannel.CORS, 'Origin allowed (codespaces)', { origin });
+    return callback(null, true);
+  }
+
+  if (origin.endsWith('.ngrok-free.app') || origin.endsWith('.ngrok.io')) {
+    logger.info(LogChannel.CORS, 'Origin allowed (ngrok)', { origin });
+    return callback(null, true);
+  }
+
+  if (NODE_ENV === 'development') {
+    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+      const port = origin.match(/:(\d+)$/)?.[1];
+      if (port && parseInt(port) >= 3000 && parseInt(port) <= 9999) {
+        logger.info(LogChannel.CORS, 'Origin allowed (localhost dev)', { origin, port });
+        return callback(null, true);
       }
     }
+  }
 
-    logger.warn(LogChannel.CORS, 'Origin blocked', { origin });
-    return callback(new Error('Not allowed by CORS'));
-  },
+  logger.warn(LogChannel.CORS, 'Origin blocked', { origin });
+  return callback(new Error('Not allowed by CORS'));
+}
+
+app.use(cors({
+  origin: validateOrigin,
   methods: ['GET', 'POST'],
 }));
 
-app.get('/ice', (_req, res) => {
+// ── C-11: /ice endpoint with origin check ──
+app.get('/ice', (req, res) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    let blocked = false;
+    validateOrigin(origin, (err) => { if (err) blocked = true; });
+    if (blocked) {
+      logger.warn(LogChannel.CORS, 'ICE endpoint blocked for origin', { origin });
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+  }
+
   logger.debug(LogChannel.SERVER, 'ICE servers endpoint called');
   
   const servers: any[] = [
@@ -122,9 +136,10 @@ const server = app.listen(PORT, () => {
   });
 });
 
+// ── C-01: Socket.IO now uses the same origin validation as Express ──
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: validateOrigin,
     methods: ['GET', 'POST'],
   },
   pingTimeout: 15000,
@@ -132,7 +147,6 @@ const io = new Server(server, {
 });
 
 const activeSockets = new Set<string>();
-const roomArr: Room[] = [];
 
 async function broadcastOnline() {
   let count = activeSockets.size;
@@ -163,6 +177,24 @@ async function initializeRedis() {
 
 initializeRedis();
 
+// ── C-06: Proper HTML entity encoding for XSS protection ──
+function sanitizeMessage(input: string): string {
+  return input
+    .slice(0, 1000)
+    .replace(/[<>&"'`]/g, (char) => {
+      const map: Record<string, string> = { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#x27;', '`': '&#x60;' };
+      return map[char] || char;
+    })
+    .trim();
+}
+
+// ── H-06: Get client IP for rate limiting (persistent across reconnections) ──
+function getClientIp(socket: Socket): string {
+  const forwarded = socket.handshake.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') return forwarded.split(',')[0].trim();
+  return socket.handshake.address;
+}
+
 io.on('connection', (socket: Socket) => {
   activeSockets.add(socket.id);
   
@@ -180,7 +212,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('start', async (clientIdOrCb?: any, cb?: (person: string) => void) => {
     try {
-      const rateLimit = await checkRateLimit(socket.id, 'start');
+      const rateLimit = await checkRateLimit(getClientIp(socket), 'start');
       
       if (!rateLimit.allowed) {
         logger.warn(LogChannel.RATE, 'Rate limit exceeded for start', {
@@ -206,7 +238,7 @@ io.on('connection', (socket: Socket) => {
         hasCallback: true
       });
 
-      await handelStart(roomArr, socket, clientId, actualCb, io);
+      await handleStart(socket, clientId, actualCb, io);
     } catch (error) {
       logger.logError(LogChannel.SERVER, 'Error in start handler', error, { socketId: socket.id });
     }
@@ -214,7 +246,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('next', async () => {
     try {
-      const rateLimit = await checkRateLimit(socket.id, 'next');
+      const rateLimit = await checkRateLimit(getClientIp(socket), 'next');
       
       if (!rateLimit.allowed) {
         logger.warn(LogChannel.RATE, 'Rate limit exceeded for next', {
@@ -227,9 +259,9 @@ io.on('connection', (socket: Socket) => {
 
       logger.info(LogChannel.SOCKET, 'Next event received', { socketId: socket.id });
 
-      await handelDisconnect(socket.id, roomArr, io, true);
+      await handleDisconnect(socket.id, io, true);
 
-      await handelStart(roomArr, socket, undefined, (person: string) => {
+      await handleStart(socket, undefined, (person: string) => {
         socket.emit('start', person);
         logger.info(LogChannel.SOCKET, 'Next -> assigned role', { socketId: socket.id, role: person });
       }, io);
@@ -245,7 +277,7 @@ io.on('connection', (socket: Socket) => {
       totalConnections: activeSockets.size
     });
     
-    await handelDisconnect(socket.id, roomArr, io, false);
+    await handleDisconnect(socket.id, io, false);
     removeFromWaitingQueue(socket.id);
     activeSockets.delete(socket.id);
     
@@ -260,7 +292,7 @@ io.on('connection', (socket: Socket) => {
     try {
       logger.info(LogChannel.SOCKET, 'Explicit disconnect requested', { socketId: socket.id });
       
-      await handelDisconnect(socket.id, roomArr, io, true);
+      await handleDisconnect(socket.id, io, true);
       removeFromWaitingQueue(socket.id);
       activeSockets.delete(socket.id);
       
@@ -282,7 +314,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('sdp:send', async (data: { sdp: any }) => {
     try {
-      const rateLimit = await checkRateLimit(socket.id, 'sdp:send');
+      const rateLimit = await checkRateLimit(getClientIp(socket), 'sdp:send');
       
       if (!rateLimit.allowed) {
         logger.warn(LogChannel.RATE, 'Rate limit exceeded for sdp:send', { socketId: socket.id });
@@ -300,7 +332,7 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
-      const info = await getType(socket.id, roomArr);
+      const info = await getType(socket.id);
       if (!info) {
         logger.warn(LogChannel.SDP, 'No room found for SDP', { socketId: socket.id });
         return;
@@ -326,7 +358,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('ice:send', async (data: { candidate: any }) => {
     try {
-      const rateLimit = await checkRateLimit(socket.id, 'ice:send');
+      const rateLimit = await checkRateLimit(getClientIp(socket), 'ice:send');
       
       if (!rateLimit.allowed) {
         logger.warn(LogChannel.RATE, 'Rate limit exceeded for ice:send', { socketId: socket.id });
@@ -339,7 +371,7 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
-      const info = await getType(socket.id, roomArr);
+      const info = await getType(socket.id);
       if (!info) {
         logger.debug(LogChannel.ICE, 'No room for ICE candidate', { socketId: socket.id });
         return;
@@ -357,7 +389,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('renegotiate', async () => {
     try {
-      const info = await getType(socket.id, roomArr);
+      const info = await getType(socket.id);
       if (!info) return;
 
       const targetId = info.partnerId;
@@ -372,7 +404,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('media:state', async (data: { cameraOff: boolean; muted: boolean; roomid: string; type: string }) => {
     try {
-      const rateLimit = await checkRateLimit(socket.id, 'media:state');
+      const rateLimit = await checkRateLimit(getClientIp(socket), 'media:state');
       if (!rateLimit.allowed) return;
 
       if (!data?.roomid) {
@@ -380,7 +412,7 @@ io.on('connection', (socket: Socket) => {
         return;
       }
       
-      const info = await getType(socket.id, roomArr);
+      const info = await getType(socket.id);
       if (!info || info.roomId !== data.roomid) {
         const actualRoomId = info && typeof info === 'object' ? info.roomId : null;
         logger.warn(LogChannel.MEDIA, 'Invalid roomid for media state', {
@@ -407,9 +439,10 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  socket.on('send-message', async (input: string, userType: string, roomid: string) => {
+  // M-02: Removed unused `userType` param — server determines role from room state
+  socket.on('send-message', async (input: string, _userType: string, roomid: string) => {
     try {
-      const rateLimit = await checkRateLimit(socket.id, 'send-message');
+      const rateLimit = await checkRateLimit(getClientIp(socket), 'send-message');
       
       if (!rateLimit.allowed) {
         logger.warn(LogChannel.RATE, 'Rate limit exceeded for send-message', { socketId: socket.id });
@@ -422,7 +455,7 @@ io.on('connection', (socket: Socket) => {
         return;
       }
       
-      const info = await getType(socket.id, roomArr);
+      const info = await getType(socket.id);
       if (!info || info.roomId !== roomid) {
         const actualRoomId = info && typeof info === 'object' ? info.roomId : null;
         logger.warn(LogChannel.CHAT, 'Invalid roomid for message', {
@@ -433,7 +466,7 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
-      const sanitized = input.slice(0, 1000).replace(/[<>]/g, '');
+      const sanitized = sanitizeMessage(input);
       
       logger.info(LogChannel.CHAT, 'Message sent', {
         socketId: socket.id,
@@ -449,7 +482,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('typing', async ({ roomid, isTyping }: { roomid: string; isTyping: boolean }) => {
     try {
-      const rateLimit = await checkRateLimit(socket.id, 'typing');
+      const rateLimit = await checkRateLimit(getClientIp(socket), 'typing');
       if (!rateLimit.allowed) return;
 
       if (typeof roomid !== 'string') {
@@ -457,7 +490,7 @@ io.on('connection', (socket: Socket) => {
         return;
       }
       
-      const info = await getType(socket.id, roomArr);
+      const info = await getType(socket.id);
       if (!info || info.roomId !== roomid) {
         const actualRoomId = info && typeof info === 'object' ? info.roomId : null;
         logger.warn(LogChannel.CHAT, 'Invalid roomid for typing', {

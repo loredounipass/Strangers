@@ -8,8 +8,12 @@ export function useChat() {
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
 
+  // C-06: Full HTML entity encoding — mirrors server sanitizeMessage()
+  // React escapes JSX by default, but we also sanitize before storing in state
+  // to protect any non-JSX rendering paths and future consumers.
   function sanitize(text) {
-    return text.replace(/[<>]/g, '');
+    const map = { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#x27;', '`': '&#x60;' };
+    return text.slice(0, 1000).replace(/[<>&"'`]/g, (c) => map[c] || c).trim();
   }
 
   const addMessage = useCallback((text, isOwn = false) => {

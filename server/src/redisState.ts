@@ -75,24 +75,30 @@ export const redisState = {
     }
   },
 
+  // C-07: Atomic take using Lua script to prevent race conditions in multi-instance deployments
   async takeFromWaitingQueue(excludeId?: string): Promise<string | null> {
     if (!isRedisConnected()) return null;
     
+    const luaScript = `
+      local list = redis.call('LRANGE', KEYS[1], 0, -1)
+      for i, id in ipairs(list) do
+        if id ~= ARGV[1] then
+          redis.call('LREM', KEYS[1], 1, id)
+          return id
+        end
+      end
+      return nil
+    `;
+
     try {
-      const list = await redis.lrange(WAITING_QUEUE_KEY, 0, -1);
-      
-      for (let i = 0; i < list.length; i++) {
-        const id = list[i];
-        if (id !== excludeId) {
-          await redis.lrem(WAITING_QUEUE_KEY, 1, id);
-          logger.info(LogChannel.QUEUE, `Took ${id} from waiting queue`, { excluded: excludeId });
-          logRedisOperation('takeFromWaitingQueue', WAITING_QUEUE_KEY, true, { taken: id, excluded: excludeId });
-          return id;
-        }
+      const taken = await redis.eval(luaScript, 1, WAITING_QUEUE_KEY, excludeId || '') as string | null;
+      if (taken) {
+        logger.info(LogChannel.QUEUE, `Took ${taken} from waiting queue (atomic)`, { excluded: excludeId });
+        logRedisOperation('takeFromWaitingQueue', WAITING_QUEUE_KEY, true, { taken, excluded: excludeId });
       }
-      return null;
+      return taken;
     } catch (error) {
-      logger.logError(LogChannel.QUEUE, 'Error taking from queue', error, { excludeId });
+      logger.logError(LogChannel.QUEUE, 'Error in atomic take from queue', error, { excludeId });
       logRedisOperation('takeFromWaitingQueue', WAITING_QUEUE_KEY, false, { excludeId, error: String(error) });
       return null;
     }
@@ -111,8 +117,8 @@ export const redisState = {
       
       await redis.hset(ROOMS_KEY, roomId, JSON.stringify(room));
       await redis.hset(SOCKET_TO_ROOM_KEY, socketId, roomId);
-      await redis.expire(ROOMS_KEY, ROOM_TTL);
-      await redis.expire(SOCKET_TO_ROOM_KEY, SOCKET_TTL);
+      // H-02: Removed redis.expire(ROOMS_KEY) — global TTL was wiping ALL rooms.
+      // Zombie cleanup interval handles stale data instead.
       
       logRedisOperation('createRoom', ROOMS_KEY, true, { roomId, socketId });
       logger.info(LogChannel.ROOM, `Created room ${roomId}`, { p1: socketId, clientId });
@@ -137,8 +143,7 @@ export const redisState = {
       
       await redis.hset(ROOMS_KEY, roomId, JSON.stringify(room));
       await redis.hset(SOCKET_TO_ROOM_KEY, socketId, roomId);
-      await redis.expire(ROOMS_KEY, ROOM_TTL);
-      await redis.expire(SOCKET_TO_ROOM_KEY, SOCKET_TTL);
+      // H-02: Removed redis.expire(ROOMS_KEY) — see createRoom comment.
       
       logRedisOperation('addPeerToRoom', ROOMS_KEY, true, { roomId, socketId, role });
       logger.info(LogChannel.ROOM, `Added ${socketId} to room ${roomId} as ${role}`, { role });

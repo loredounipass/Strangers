@@ -202,8 +202,8 @@ async function matchPeersAsync(
   return room;
 }
 
-export async function handelStart(
-  _roomArr: Room[],
+// C-02: Removed dead _roomArr param. L-05: Fixed typo handel → handle.
+export async function handleStart(
   socket: Socket,
   clientId: string | undefined,
   cb: (role: PeerRole) => void,
@@ -219,19 +219,24 @@ export async function handelStart(
 
   await cleanupSocketAsync(socket.id, io, true);
 
-  const waitingId = await takeFromWaitingQueueAsync(io, socket.id);
+  // H-07: Use a while-loop instead of unbounded recursion to skip dead sockets
+  let waitingId: string | null = null;
+  let waitingSocket: Socket | undefined;
 
-  if (waitingId) {
+  do {
+    waitingId = await takeFromWaitingQueueAsync(io, socket.id);
+    if (!waitingId) break;
+    waitingSocket = io.sockets.sockets.get(waitingId);
+    if (!waitingSocket) {
+      logger.warn(LogChannel.MATCH, 'Waiting socket disconnected, skipping', { waitingSocket: waitingId });
+    }
+  } while (!waitingSocket);
+
+  if (waitingId && waitingSocket) {
     logger.info(LogChannel.MATCH, 'Found match in queue', { 
       waitingSocket: waitingId, 
       newSocket: socket.id 
     });
-    
-    const waitingSocket = io.sockets.sockets.get(waitingId);
-    if (!waitingSocket) {
-      logger.warn(LogChannel.MATCH, 'Waiting socket disconnected, retrying', { waitingSocket: waitingId });
-      return handelStart(_roomArr, socket, clientId, cb, io);
-    }
 
     await matchPeersAsync(io, waitingSocket, socket, null, cid);
 
@@ -259,9 +264,9 @@ export async function handelStart(
   }
 }
 
-export async function handelDisconnect(
+// C-02: Removed dead _roomArr param. L-05: Fixed typo handel → handle.
+export async function handleDisconnect(
   disconnectedId: string,
-  _roomArr: Room[],
   io: Server,
   forceCleanup: boolean = false
 ): Promise<void> {
@@ -300,7 +305,8 @@ async function cleanupSocketAsync(socketId: string, io: Server, notifyPartner: b
   await destroyRoomAsync(room.roomId);
 }
 
-export async function getType(socketId: string, _roomArr: Room[]): Promise<GetTypesResult> {
+// C-02: Removed dead _roomArr param.
+export async function getType(socketId: string): Promise<GetTypesResult> {
   const room = await getRoomBySocketAsync(socketId);
   if (!room) {
     logger.debug(LogChannel.ROOM, 'getType: No room found', { socketId });
@@ -325,7 +331,8 @@ export async function getType(socketId: string, _roomArr: Room[]): Promise<GetTy
   return { type: role, partnerId, roomId: room.roomId };
 }
 
-export function markRoomAsWaiting(_roomArr: Room[], socketId: string): void {
+// C-02: Removed dead _roomArr param.
+export function markRoomAsWaiting(socketId: string): void {
   addToWaitingQueue(socketId);
 }
 
@@ -358,23 +365,27 @@ setInterval(async () => {
       }
     }
   } else {
+    // H-01: Collect IDs to destroy first, then destroy (avoids mutating Map during iteration)
+    const toDestroy: string[] = [];
     for (const [roomId, room] of rooms) {
       roomsChecked++;
       const hasP1 = room.p1 !== null;
       const hasP2 = room.p2 !== null;
 
       if (!hasP1 && !hasP2) {
-        destroyRoomAsync(roomId);
-        roomsDestroyed++;
+        toDestroy.push(roomId);
         continue;
       }
 
       if (now - room.createdAt > 60_000) {
         if (hasP1 && !hasP2 && !waitingQueue.includes(room.p1!.socketId)) {
-          destroyRoomAsync(roomId);
-          roomsDestroyed++;
+          toDestroy.push(roomId);
         }
       }
+    }
+    for (const roomId of toDestroy) {
+      await destroyRoomAsync(roomId);
+      roomsDestroyed++;
     }
   }
   

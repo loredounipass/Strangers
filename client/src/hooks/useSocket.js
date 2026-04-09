@@ -3,7 +3,8 @@ import { io } from 'socket.io-client';
 import { AppState } from './useAppState.js';
 import { getClientId } from './useWebRTC.js';
 
-const SOCKET_URL = 'https://ctqkwg7k-8000.use2.devtunnels.ms';
+// C-03: URL from environment variable instead of hardcoded
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:8000';
 
 const RECONNECT_CONFIG = {
   maxAttempts: 3,
@@ -244,8 +245,15 @@ export function useSocket({
         webrtc.attemptPlay();
       }
 
+      // H-03: Don't mute the <video> element — it causes permanent audio loss.
+      // Instead, handle partner mute state via the remote audio track.
       if (typeof muted === 'boolean') {
-        video.muted = muted;
+        const remoteStream = video.srcObject;
+        if (remoteStream) {
+          remoteStream.getAudioTracks().forEach(track => {
+            track.enabled = !muted;
+          });
+        }
       }
     });
 

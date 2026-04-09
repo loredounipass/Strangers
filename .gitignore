@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+dist/
+
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+
+# Build output
+client/dist/
+server/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Lock files (optional — remove if you want to track these)
+# pnpm-lock.yaml

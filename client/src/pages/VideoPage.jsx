@@ -23,6 +23,7 @@ export default function VideoPage() {
   const myVideoRef      = useRef(null);
   const strangerVideoRef = useRef(null);
   const inputRef        = useRef(null);
+  const typingTimerRef   = useRef(null); // H-04: avoid window pollution
 
   // ---- UI STATE ----
   const [spinnerVisible, setSpinnerVisible] = useState(true);
@@ -31,7 +32,7 @@ export default function VideoPage() {
   const [activeVideo, setActiveVideo] = useState('stranger'); // 'stranger' | 'self'
 
   // ---- HOOKS ----
-  const { STATE, setAppState, canPerformAction } = useAppState();
+  const { STATE, appState, setAppState, canPerformAction } = useAppState();
   const { messages, isTyping, addMessage, clearMessages, showTyping, sanitize } = useChat();
   const { notifications, showNotification } = useNotification();
 
@@ -113,31 +114,8 @@ export default function VideoPage() {
     setAppState(AppState.CONNECTING);
   }, [STATE, webrtc, setAppState]);
 
-  const handleExit = useCallback(() => {
-    STATE.isExiting = true;
-    let didAck = false;
-
-    const cleanup = () => {
-      try { webrtc.fullCleanup(); } catch (e) {}
-      try { disconnectSocket(); } catch (e) {}
-      navigate('/checking');
-    };
-
-    try {
-      STATE.socket.emit('disconnect-me', () => {
-        didAck = true;
-        cleanup();
-      });
-    } catch (e) {
-      cleanup();
-    }
-
-    setTimeout(() => {
-      if (!didAck) cleanup();
-    }, 500);
-  }, [STATE, webrtc, disconnectSocket, navigate]);
-
-  const handleBack = useCallback(() => {
+  // M-03: handleExit and handleBack were identical — unified into handleLeave
+  const handleLeave = useCallback(() => {
     STATE.isExiting = true;
     let didAck = false;
 
@@ -181,12 +159,13 @@ export default function VideoPage() {
     }
   }, [STATE, sanitize, addMessage]);
 
+  // H-04: Use ref instead of window global for typing debounce timer
   const handleInput = useCallback((value) => {
     try {
       if (STATE.socket && STATE.roomid) {
         STATE.socket.emit('typing', { roomid: STATE.roomid, isTyping: true });
-        clearTimeout(window.__typingTimer__);
-        window.__typingTimer__ = setTimeout(() => {
+        clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = setTimeout(() => {
           try {
             if (STATE.socket && STATE.roomid) {
               STATE.socket.emit('typing', { roomid: STATE.roomid, isTyping: false });
@@ -209,7 +188,7 @@ export default function VideoPage() {
           <div className="sidebar-logo">
             <img src="/assets/cosmogle.png" alt="Logo" />
           </div>
-          <button className="sidebar-back-btn" onClick={handleBack}>
+          <button className="sidebar-back-btn" onClick={handleLeave}>
             Atrás
           </button>
         </div>
@@ -217,9 +196,10 @@ export default function VideoPage() {
         <VideoHolder
           ref={{ myVideoRef, strangerVideoRef }}
           spinnerVisible={spinnerVisible}
+          appState={appState}
           onNext={handleNext}
           onMute={handleMute}
-          onExit={handleExit}
+          onExit={handleLeave}
           onCamera={handleCamera}
           muteBtnText={muteBtnText}
           cameraBtnText={cameraBtnText}

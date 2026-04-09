@@ -19,6 +19,18 @@ const getClientKey = (identifier: string, event: string): string => {
   return `ratelimit:${event}:${identifier}`;
 };
 
+// H-08: In-memory rate limiter fallback when Redis is down
+const memoryLimits = new Map<string, { timestamps: number[] }>();
+
+// Clean up old entries periodically to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, data] of memoryLimits) {
+    data.timestamps = data.timestamps.filter(t => t > now - RATE_LIMIT_WINDOW_MS);
+    if (data.timestamps.length === 0) memoryLimits.delete(key);
+  }
+}, 60_000);
+
 export const checkRateLimit = async (
   identifier: string,
   event: string,
@@ -30,12 +42,24 @@ export const checkRateLimit = async (
   const windowStart = now - windowMs;
 
   if (!isRedisConnected()) {
-    logger.debug(LogChannel.RATE, 'Redis not connected, allowing request (in-memory mode)', { identifier, event });
-    return {
-      allowed: true,
-      remaining: maxRequests,
-      resetTime: now + windowMs,
-    };
+    // H-08: In-memory sliding window fallback
+    let entry = memoryLimits.get(key);
+    if (!entry) {
+      entry = { timestamps: [] };
+      memoryLimits.set(key, entry);
+    }
+    entry.timestamps = entry.timestamps.filter(t => t > windowStart);
+    entry.timestamps.push(now);
+
+    const requestCount = entry.timestamps.length;
+    if (requestCount > maxRequests) {
+      const oldestTime = entry.timestamps[0];
+      const retryAfter = Math.ceil((oldestTime + windowMs - now) / 1000);
+      logger.warn(LogChannel.RATE, 'Rate limit exceeded (in-memory)', { identifier, event, current: requestCount, max: maxRequests });
+      return { allowed: false, remaining: 0, resetTime: now + windowMs, retryAfter };
+    }
+
+    return { allowed: true, remaining: Math.max(0, maxRequests - requestCount), resetTime: now + windowMs };
   }
 
   try {
