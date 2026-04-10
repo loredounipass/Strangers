@@ -1,12 +1,14 @@
-# Strangers
+# cosmogle
 
-Stranger is a chill random video chat app where you can connect face-to-face with total strangers — no accounts, no drama, just hit “start” and vibe. It’s like Omegle, but self-built, using WebRTC and Socket.IO to handle real-time video, audio, and text chat smoothly.
+cosmogle is a chill random video chat app where you can connect face-to-face with total strangers — no accounts, no drama, just hit “start” and vibe. It’s like Omegle, but self-built, using WebRTC and Socket.IO to handle real-time video, audio, and text chat smoothly.
 
 The app is still in development and there’s plenty of room for improvement, but the core idea is already live. It’s an open project — anyone’s welcome to contribute!
 
 
 
-![strangers-logo](./client/public/black%20yellow%20minimalist%20Idea%20Logo.gif)
+![cosmogle-logo](./client/assets/cosmogle.png)
+
+![Arquitectura](./server/arquitectura/the_strangers_system_architecture_1.png)
 
 Este proyecto utiliza las siguientes tecnologías:
 
@@ -23,8 +25,7 @@ Este proyecto utiliza las siguientes tecnologías:
 
 ## Clonar repositorio
 ```
-$ git clone https://github.com/Erick-MC-Cedeno/Strangers
-```
+$ git clone https://github.com/loredounipass/Strangers
 ```
 $ cd Strangers
 ```
@@ -33,18 +34,18 @@ $ cd Strangers
 
 ```bash
 $ cd client
-$ npm install
-$ npm run dev
+$ pnpm install
+$ pnpm run dev
 ```
 
 ## Iniciar Backend
 
 ```bash
 $ cd server
-$ npm install
-$ npm start
+$ pnpm install
+$ pnpm run dev
 ```
 
 
-![Inicio](./client/public/CAPTURAS/INICIO.png)
-![Video](./client/public/CAPTURAS/VIDEO.png)
+![Inicio](./capturas/INICIO.png)
+![Video](./capturas/VIDEO.png)
