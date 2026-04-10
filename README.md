@@ -5,15 +5,6 @@ cosmogle is a chill random video chat app where you can connect face-to-face wit
 The app is still in development and there’s plenty of room for improvement, but the core idea is already live. It’s an open project — anyone’s welcome to contribute!
 
 
-# logo
-![cosmogle-logo](./client/assets/cosmogle.png)
-
-# Arquitectura
-![Arquitectura](./server/arquitectura/the_cosmogle_system_architecture_1.png)
-
-# Conexion
-![Conexion](./server//arquitectura/p2p_connection_flow_diagram_2.png)
-
 Este proyecto utiliza las siguientes tecnologías:
 
 ## 🛠️ Tecnologías Stack
@@ -25,6 +16,16 @@ Este proyecto utiliza las siguientes tecnologías:
 - ![TailwindCSS](https://img.shields.io/badge/TailwindCSS-38B2AC?style=flat&logo=tailwind-css&logoColor=white) **TailwindCSS**
 - ![Express](https://img.shields.io/badge/Express.js-404D59?style=flat&logo=express&logoColor=white) **Express.js**
 - ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white) **Docker**
+
+# logo
+![cosmogle-logo](./client/assets/cosmogle.png)
+
+# Arquitectura
+![Arquitectura](./server/arquitectura/the_cosmogle_system_architecture_1.png)
+
+# Conexion
+![Conexion](./server//arquitectura/p2p_connection_flow_diagram_2.png)
+
 
 ## Configuración del entorno
 
