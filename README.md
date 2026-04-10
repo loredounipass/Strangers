@@ -5,9 +5,10 @@ cosmogle is a chill random video chat app where you can connect face-to-face wit
 The app is still in development and there’s plenty of room for improvement, but the core idea is already live. It’s an open project — anyone’s welcome to contribute!
 
 
-
+# logo
 ![cosmogle-logo](./client/assets/cosmogle.png)
 
+# Arquitectura
 ![Arquitectura](./server/arquitectura/the_strangers_system_architecture_1.png)
 
 Este proyecto utiliza las siguientes tecnologías:
