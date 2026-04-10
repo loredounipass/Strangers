@@ -36,26 +36,6 @@ function validateOrigin(origin: string | undefined, callback: (err: Error | null
     return callback(null, true);
   }
 
-  if (origin.endsWith('.app.github.dev') || origin.endsWith('.devtunnels.ms')) {
-    logger.info(LogChannel.CORS, 'Origin allowed (codespaces)', { origin });
-    return callback(null, true);
-  }
-
-  if (origin.endsWith('.ngrok-free.app') || origin.endsWith('.ngrok.io')) {
-    logger.info(LogChannel.CORS, 'Origin allowed (ngrok)', { origin });
-    return callback(null, true);
-  }
-
-  if (NODE_ENV === 'development') {
-    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-      const port = origin.match(/:(\d+)$/)?.[1];
-      if (port && parseInt(port) >= 3000 && parseInt(port) <= 9999) {
-        logger.info(LogChannel.CORS, 'Origin allowed (localhost dev)', { origin, port });
-        return callback(null, true);
-      }
-    }
-  }
-
   logger.warn(LogChannel.CORS, 'Origin blocked', { origin });
   return callback(new Error('Not allowed by CORS'));
 }
@@ -87,18 +67,10 @@ app.get('/ice', (req, res) => {
   const turnUrl  = process.env.TURN_URL;
   const turnUser = process.env.TURN_USERNAME;
   const turnCred = process.env.TURN_CREDENTIAL;
-
   if (turnUrl && turnUser && turnCred) {
-    const hostMatch = turnUrl.match(/turn:([^:]+)/);
-    const host = hostMatch ? hostMatch[1] : null;
-
-    if (host) {
-      servers.push({ urls: `turn:${host}:80`,                    username: turnUser, credential: turnCred });
-      servers.push({ urls: `turn:${host}:443`,                   username: turnUser, credential: turnCred });
-      servers.push({ urls: `turn:${host}:443?transport=tcp`,     username: turnUser, credential: turnCred });
-    } else {
-      servers.push({ urls: turnUrl, username: turnUser, credential: turnCred });
-    }
+    // We no longer hardcode ports 80 and 443, to support custom Docker ports
+    servers.push({ urls: turnUrl, username: turnUser, credential: turnCred });
+    servers.push({ urls: `${turnUrl}?transport=tcp`, username: turnUser, credential: turnCred });
     
     logger.debug(LogChannel.SERVER, 'TURN servers configured', { count: servers.length });
   }
@@ -189,10 +161,22 @@ function sanitizeMessage(input: string): string {
 }
 
 // ── H-06: Get client IP for rate limiting (persistent across reconnections) ──
+const TRUST_PROXY = process.env.TRUST_PROXY === 'true';
+
 function getClientIp(socket: Socket): string {
-  const forwarded = socket.handshake.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') return forwarded.split(',')[0].trim();
-  return socket.handshake.address;
+  // If explicitly hosted behind a trusted reverse proxy (e.g. Nginx, Cloudflare),
+  // we safely extract the real IP from the headers.
+  if (TRUST_PROXY) {
+    const forwarded = socket.handshake.headers['x-forwarded-for'];
+    if (typeof forwarded === 'string') {
+      const realIp = forwarded.split(',')[0].trim();
+      if (realIp) return realIp.replace(/^::ffff:/, '');
+    }
+  }
+  
+  // Otherwise, default to raw TCP remote address, sanitizing IPv6-mapped IPv4.
+  const rawIp = socket.handshake.address || '';
+  return rawIp.replace(/^::ffff:/, '');
 }
 
 io.on('connection', (socket: Socket) => {

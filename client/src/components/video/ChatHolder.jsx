@@ -45,12 +45,12 @@ export default function ChatHolder({
         className="typing-indicator"
         style={{ display: isTyping ? 'flex' : 'none' }}
       >
+        <span className="typing-text">Stranger is typing</span>
         <div className="typing-dots">
           <span></span>
           <span></span>
           <span></span>
         </div>
-        <span className="typing-text">Stranger is typing</span>
       </div>
 
       <div className="input">

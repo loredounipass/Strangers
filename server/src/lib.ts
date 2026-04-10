@@ -159,17 +159,17 @@ function getPartnerInRoom(socketId: string, room: Room): string | null {
 
 async function matchPeersAsync(
   io: Server,
-  p1Socket: Socket,
+  p1SocketId: string,
   p2Socket: Socket,
   p1ClientId: string | null,
   p2ClientId: string | null
 ): Promise<Room> {
-  let room = await getRoomBySocketAsync(p1Socket.id);
+  let room = await getRoomBySocketAsync(p1SocketId);
 
   if (!room) {
-    logger.warn(LogChannel.MATCH, 'No existing room for p1, creating new', { p1: p1Socket.id });
-    room = createRoom(p1Socket.id, p1ClientId);
-    p1Socket.join(room.roomId);
+    logger.warn(LogChannel.MATCH, 'No existing room for p1, creating new', { p1: p1SocketId });
+    room = createRoom(p1SocketId, p1ClientId);
+    io.in(p1SocketId).socketsJoin(room.roomId);
   }
 
   room.p2 = { socketId: p2Socket.id, clientId: p2ClientId };
@@ -177,7 +177,7 @@ async function matchPeersAsync(
   rooms.set(room.roomId, room);
   
   logger.info(LogChannel.MATCH, `Matched peers in room ${room.roomId}`, {
-    p1: p1Socket.id,
+    p1: p1SocketId,
     p2: p2Socket.id,
     p1ClientId,
     p2ClientId
@@ -189,15 +189,15 @@ async function matchPeersAsync(
 
   p2Socket.join(room.roomId);
 
-  p1Socket.emit('roomid', room.roomId);
+  io.to(p1SocketId).emit('roomid', room.roomId);
   p2Socket.emit('roomid', room.roomId);
 
-  p1Socket.emit('remote-socket', p2Socket.id);
-  p2Socket.emit('remote-socket', p1Socket.id);
+  io.to(p1SocketId).emit('remote-socket', p2Socket.id);
+  p2Socket.emit('remote-socket', p1SocketId);
 
-  p1Socket.emit('start', 'p1');
+  io.to(p1SocketId).emit('start', 'p1');
 
-  logger.info(LogChannel.MATCH, `Paired ${p1Socket.id} (p1) <-> ${p2Socket.id} (p2)`, { roomId: room.roomId });
+  logger.info(LogChannel.MATCH, `Paired ${p1SocketId} (p1) <-> ${p2Socket.id} (p2)`, { roomId: room.roomId });
   
   return room;
 }
@@ -221,24 +221,29 @@ export async function handleStart(
 
   // H-07: Use a while-loop instead of unbounded recursion to skip dead sockets
   let waitingId: string | null = null;
-  let waitingSocket: Socket | undefined;
+  let p1ClientId: string | null = null;
 
   do {
     waitingId = await takeFromWaitingQueueAsync(io, socket.id);
     if (!waitingId) break;
-    waitingSocket = io.sockets.sockets.get(waitingId);
-    if (!waitingSocket) {
-      logger.warn(LogChannel.MATCH, 'Waiting socket disconnected, skipping', { waitingSocket: waitingId });
+    
+    // We fetch the room to ensure it exists and get P1's client ID for the new distributed architecture
+    const room = await getRoomBySocketAsync(waitingId);
+    if (!room) {
+      logger.warn(LogChannel.MATCH, 'Waiting socket room not found, skipping', { waitingSocket: waitingId });
+      waitingId = null;
+    } else {
+      p1ClientId = room.p1?.clientId || null;
     }
-  } while (!waitingSocket);
+  } while (!waitingId);
 
-  if (waitingId && waitingSocket) {
+  if (waitingId) {
     logger.info(LogChannel.MATCH, 'Found match in queue', { 
       waitingSocket: waitingId, 
       newSocket: socket.id 
     });
 
-    await matchPeersAsync(io, waitingSocket, socket, null, cid);
+    await matchPeersAsync(io, waitingId, socket, p1ClientId, cid);
 
     cb('p2');
 
@@ -342,28 +347,9 @@ setInterval(async () => {
   let roomsDestroyed = 0;
   
   if (useRedis()) {
-    const redisRooms = await redisState.getAllRooms();
-    for (const [roomId, room] of redisRooms) {
-      roomsChecked++;
-      const hasP1 = room.p1 !== null;
-      const hasP2 = room.p2 !== null;
-
-      if (!hasP1 && !hasP2) {
-        await redisState.destroyRoom(roomId);
-        roomsDestroyed++;
-        continue;
-      }
-
-      if (now - room.createdAt > 60_000) {
-        if (hasP1 && !hasP2) {
-          const queue = await redisState.getWaitingQueue();
-          if (!queue.includes(room.p1!.socketId)) {
-            await redisState.destroyRoom(roomId);
-            roomsDestroyed++;
-          }
-        }
-      }
-    }
+    const stats = await redisState.cleanZombieRooms();
+    roomsChecked += stats.checked;
+    roomsDestroyed += stats.destroyed;
   } else {
     // H-01: Collect IDs to destroy first, then destroy (avoids mutating Map during iteration)
     const toDestroy: string[] = [];

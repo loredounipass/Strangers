@@ -67,18 +67,33 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
 
   function handleError(type, error) {
     log('ERROR', type, error);
+
+    // If an ICE restart was triggered recently (e.g. last 10 seconds), ignore redundant errors.
+    const now = Date.now();
+    if (STATE._iceRestartTime && (now - STATE._iceRestartTime < 10000)) {
+       log('ERROR', 'Ignored because ICE restart is recently in progress');
+       return;
+    }
+
     if (type.includes('ICE') || type.includes('connection')) {
       // Intentar ICE restart una vez antes de rendirse
-      if (!STATE._iceRestartAttempted && STATE.peer && STATE.peer.connectionState !== 'closed') {
+      if (!STATE._iceRestartTime && STATE.peer && STATE.peer.connectionState !== 'closed') {
+        STATE._iceRestartTime = now;
         STATE._iceRestartAttempted = true;
         log('ICE', 'Attempting ICE restart...');
         showNotification('Reconnecting...');
+        
+        // Reset FSM to allow the new ICE restart offer
+        if (STATE.appState === AppState.NEGOTIATING) {
+          setAppState(AppState.CONNECTED);
+        }
+
         try {
+          STATE.isNegotiating = false;
           STATE.peer.restartIce();
           // Solo p1 renegocia con offer tras ICE restart
           if (STATE.type === 'p1') {
-            STATE.isNegotiating = false;
-            createOffer();
+            createOffer(true);
           }
           return; // no mostrar error aún, esperar resultado del restart
         } catch (e) {
@@ -88,6 +103,7 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
 
       // Si ya se intentó ICE restart o falló, mostrar error
       STATE._iceRestartAttempted = false;
+      STATE._iceRestartTime = 0;
       setSpinnerVisible(true);
       showNotification('Connection failed. Press NEXT to try again.');
       STATE.retryCount = 0;
@@ -260,8 +276,8 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
   // ----------------------------------------
   // SDP
   // ----------------------------------------
-  async function createOffer() {
-    if (!STATE.peer || !canPerformAction('offer')) {
+  async function createOffer(force = false) {
+    if (!STATE.peer || (!force && !canPerformAction('offer'))) {
       log('SDP', 'createOffer blocked');
       return;
     }
@@ -403,9 +419,12 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
       if (pState === 'connected') {
         timers.clearTimer('iceTimeout');
         setAppState(AppState.CONNECTED);
+        setSpinnerVisible(false);
+        showNotification('Connected');
         STATE.isReconnecting = false;
         STATE.retryCount = 0;
         STATE._iceRestartAttempted = false; // reset para futuras reconexiones
+        STATE._iceRestartTime = 0;
       } else if (pState === 'failed') {
         handleError('CONNECTION_FAILED', pState);
       }

@@ -35,7 +35,7 @@ export function useMedia(STATE, showNotification) {
     }
   }, [STATE]);
 
-  const toggleCamera = useCallback(async (myVideoEl, setCameraBtnText) => {
+  const toggleCamera = useCallback(async (myVideoEl, setCameraBtnText, setMuteBtnText) => {
     if (!STATE.localStream) {
       showNotification('No camera available');
       return;
@@ -73,13 +73,14 @@ export function useMedia(STATE, showNotification) {
         if (myVideoEl) myVideoEl.srcObject = STATE.localStream;
         showNotification('Video ON');
 
-        // Enable audio when camera turns on
+        // Enable audio when camera turns on & sync UI
         const { audio } = getStreamTracks(STATE.localStream);
         if (audio.length > 0) {
           STATE.isMuted = false;
           audio.forEach((track) => {
             track.enabled = true;
           });
+          if (setMuteBtnText) setMuteBtnText('MUTE');
         }
 
         // Renegociación
@@ -126,7 +127,7 @@ export function useMedia(STATE, showNotification) {
     setCameraBtnText(STATE.isCameraOff ? 'OFF' : 'ON');
     showNotification(STATE.isCameraOff ? 'Video OFF' : 'Video ON');
 
-    // When camera turns off, mute the microphone
+    // When camera turns off, mute the microphone & sync UI
     if (STATE.isCameraOff) {
       const { audio } = getStreamTracks(STATE.localStream);
       if (audio.length > 0) {
@@ -134,6 +135,7 @@ export function useMedia(STATE, showNotification) {
         audio.forEach((track) => {
           track.enabled = false;
         });
+        if (setMuteBtnText) setMuteBtnText('MUTED');
       }
     }
 

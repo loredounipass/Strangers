@@ -43,6 +43,8 @@ export function useAppState() {
     videoPlayRetries: 0,
     iceServers: null,
     currentQualityLevel: 'high',
+    _iceRestartAttempted: false,
+    _iceRestartTime: 0,
   });
 
   const STATE = stateRef.current;

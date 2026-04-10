@@ -140,7 +140,7 @@ export default function VideoPage() {
   }, [STATE, webrtc, disconnectSocket, navigate]);
 
   const handleCamera = useCallback(() => {
-    toggleCamera(myVideoRef.current, setCameraBtnText);
+    toggleCamera(myVideoRef.current, setCameraBtnText, setMuteBtnText);
   }, [toggleCamera]);
 
   const handleMute = useCallback(() => {

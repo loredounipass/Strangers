@@ -213,28 +213,59 @@ export const redisState = {
     }
   },
 
-  async getAllRooms(): Promise<Map<string, Room>> {
-    const roomsMap = new Map<string, Room>();
+  // H-09: Optimized memory-safe batch cleaner replacing destructive hgetall
+  async cleanZombieRooms(): Promise<{ checked: number, destroyed: number }> {
+    let checked = 0;
+    let destroyed = 0;
     
-    if (!isRedisConnected()) return roomsMap;
+    if (!isRedisConnected()) return { checked, destroyed };
     
     try {
-      const roomsData = await redis.hgetall(ROOMS_KEY);
+      let cursor = '0';
+      const now = Date.now();
       
-      for (const [roomId, roomJson] of Object.entries(roomsData)) {
-        try {
-          roomsMap.set(roomId, JSON.parse(roomJson as string));
-        } catch (e) {
-          logger.logError(LogChannel.ROOM, 'Error parsing room JSON', e as Error, { roomId });
+      do {
+        const [nextCursor, elements] = await redis.hscan(ROOMS_KEY, cursor, 'COUNT', 100);
+        cursor = nextCursor;
+        
+        // Grab queue once per batch to avoid immense latency
+        const queue = await this.getWaitingQueue();
+
+        for (let i = 0; i < elements.length; i += 2) {
+          const roomId = elements[i];
+          const roomJson = elements[i + 1];
+          checked++;
+          
+          try {
+            const room: Room = JSON.parse(roomJson);
+            const hasP1 = room.p1 !== null;
+            const hasP2 = room.p2 !== null;
+
+            if (!hasP1 && !hasP2) {
+              await this.destroyRoom(roomId);
+              destroyed++;
+              continue;
+            }
+
+            if (now - room.createdAt > 60_000) {
+              if (hasP1 && !hasP2 && !queue.includes(room.p1!.socketId)) {
+                await this.destroyRoom(roomId);
+                destroyed++;
+              }
+            }
+          } catch (e) {
+            logger.logError(LogChannel.ROOM, 'Corrupt room JSON, destroying', e as Error, { roomId });
+            await this.destroyRoom(roomId);
+            destroyed++;
+          }
         }
-      }
+      } while (cursor !== '0');
       
-      logger.debug(LogChannel.ROOM, 'Get all rooms', { count: roomsMap.size });
     } catch (error) {
-      logger.logError(LogChannel.ROOM, 'Error getting all rooms', error);
+      logger.logError(LogChannel.ROOM, 'Error running automated zone cleanup', error);
     }
     
-    return roomsMap;
+    return { checked, destroyed };
   },
 
   async addActiveSocket(socketId: string): Promise<number> {

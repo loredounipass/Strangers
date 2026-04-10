@@ -12,6 +12,25 @@ services:
     networks:
       - backend
 
+  turn:
+    image: coturn/coturn:latest
+    container_name: turn
+    restart: unless-stopped
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "49152-49160:49152-49160/udp"
+    command:
+      - -n
+      - --log-file=stdout
+      - --min-port=49152
+      - --max-port=49160
+      - --user=strangers:strangers123
+      - --realm=strangers.local
+      - --lt-cred-mech
+    networks:
+      - backend
+
 networks:
   backend:
     driver: bridge

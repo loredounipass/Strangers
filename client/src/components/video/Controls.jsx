@@ -15,7 +15,7 @@ export default function Controls({
 
   return (
     <div className="controls">
-      <button id="muteBtn" className="cyber-button" onClick={onMute} title="Mute/Unmute">
+      <button id="muteBtn" className={`cyber-button${isMuted ? ' mute-off' : ''}`} onClick={onMute} title="Mute/Unmute">
         {isMuted ? (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 1.56"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
         ) : (
@@ -23,7 +23,7 @@ export default function Controls({
         )}
       </button>
 
-      <button id="cameraBtn" className="cyber-button" onClick={onCamera} title="Camera On/Off">
+      <button id="cameraBtn" className={`cyber-button${isCameraOff ? ' mute-off' : ''}`} onClick={onCamera} title="Camera On/Off">
         {isCameraOff ? (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.66 6H14a2 2 0 0 1 2 2v2.34l1.38 1.36"/><path d="M16 16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2.34l1.36 1.38"/><path d="m22 8-6 4 6 4V8Z"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
         ) : (
