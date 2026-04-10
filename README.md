@@ -20,6 +20,8 @@ Este proyecto utiliza las siguientes tecnologías:
 - ![WebRTC](https://img.shields.io/badge/WebRTC-333333?style=flat&logo=webrtc&logoColor=white) **WebRTC**
 - ![HTML](https://img.shields.io/badge/HTML-E34F26?style=flat&logo=html5&logoColor=white) **HTML**
 - ![CSS](https://img.shields.io/badge/CSS-1572B6?style=flat&logo=css3&logoColor=white) **CSS**
+- ![Express](https://img.shields.io/badge/Express.js-404D59?style=flat&logo=express&logoColor=white) **Express.js**
+- ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white) **Docker**
 
 ## Configuración del entorno
 
@@ -47,6 +49,6 @@ $ pnpm install
 $ pnpm run dev
 ```
 
-
+![Welcome](./capturas/WELCOME.png)
 ![Inicio](./capturas/INICIO.png)
 ![Video](./capturas/VIDEO.png)
