@@ -9,7 +9,7 @@ The app is still in development and there’s plenty of room for improvement, bu
 ![cosmogle-logo](./client/assets/cosmogle.png)
 
 # Arquitectura
-![Arquitectura](./server/arquitectura/the_strangers_system_architecture_1.png)
+![Arquitectura](./server/arquitectura/the_cosmogle_system_architecture_1.png)
 
 # Conexion
 ![Conexion](./server//arquitectura/p2p_connection_flow_diagram_2.png)
