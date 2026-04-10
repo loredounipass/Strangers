@@ -69,6 +69,7 @@ $ pnpm run dev
 
 ## iniciar contenedores turn server y redis
 ```bash
+$ cd cosmogle
 $ docker-compose up -d
 ```
 
