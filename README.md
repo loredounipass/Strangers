@@ -11,6 +11,9 @@ The app is still in development and there’s plenty of room for improvement, bu
 # Arquitectura
 ![Arquitectura](./server/arquitectura/the_strangers_system_architecture_1.png)
 
+# Conexion
+![Conexion](./server//arquitectura/p2p_connection_flow_diagram_2.png)
+
 Este proyecto utiliza las siguientes tecnologías:
 
 ## 🛠️ Tecnologías Stack
