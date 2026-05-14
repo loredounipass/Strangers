@@ -14,20 +14,24 @@ import {
 export function useMedia(STATE, showNotification) {
   const initMedia = useCallback(async (myVideoEl) => {
     try {
+      // Por defecto iniciamos con la cámara apagada, pero asegurándonos de que
+      // el estado global también refleje que NO estamos muteados inicialmente
       STATE.isCameraOff = true;
+      STATE.isMuted = false;
 
       STATE.localStream = await getAudioOnlyStream();
-      enableAudioTracks(STATE.localStream);
+      // Aseguramos de que los tracks de audio estén habilitados desde el principio
+      const { audio } = getStreamTracks(STATE.localStream);
+      audio.forEach(track => track.enabled = true);
 
       if (myVideoEl) {
         myVideoEl.srcObject = STATE.localStream;
-        myVideoEl.muted = true;
+        myVideoEl.muted = true; // El video local siempre está muteado para no escuchar el propio eco
       }
 
-      const tracks = getStreamTracks(STATE.localStream);
       console.log('[MEDIA] Stream initialized - Audio only', {
-        videoTracks: tracks.video.length,
-        audioTracks: tracks.audio.length,
+        videoTracks: 0,
+        audioTracks: audio.length,
       });
     } catch (err) {
       console.error('[MEDIA] Error initializing media', err);
@@ -73,14 +77,12 @@ export function useMedia(STATE, showNotification) {
         if (myVideoEl) myVideoEl.srcObject = STATE.localStream;
         showNotification('Video ON');
 
-        // Enable audio when camera turns on & sync UI
+        // Enable audio when camera turns on ONLY IF it wasn't explicitly muted by the user
         const { audio } = getStreamTracks(STATE.localStream);
         if (audio.length > 0) {
-          STATE.isMuted = false;
           audio.forEach((track) => {
-            track.enabled = true;
+            track.enabled = !STATE.isMuted;
           });
-          if (setMuteBtnText) setMuteBtnText('MUTE');
         }
 
         // Renegociación
@@ -127,17 +129,8 @@ export function useMedia(STATE, showNotification) {
     setCameraBtnText(STATE.isCameraOff ? 'OFF' : 'ON');
     showNotification(STATE.isCameraOff ? 'Video OFF' : 'Video ON');
 
-    // When camera turns off, mute the microphone & sync UI
-    if (STATE.isCameraOff) {
-      const { audio } = getStreamTracks(STATE.localStream);
-      if (audio.length > 0) {
-        STATE.isMuted = true;
-        audio.forEach((track) => {
-          track.enabled = false;
-        });
-        if (setMuteBtnText) setMuteBtnText('MUTED');
-      }
-    }
+    // When camera turns off, we DO NOT mute the microphone automatically anymore.
+    // Audio and video are now completely independent.
 
     try {
       if (STATE.socket && STATE.roomid) {
@@ -154,12 +147,6 @@ export function useMedia(STATE, showNotification) {
   const toggleMute = useCallback((setMuteBtnText) => {
     if (!STATE.localStream) {
       showNotification('No audio available');
-      return;
-    }
-
-    // Don't allow mute toggle if camera is off
-    if (STATE.isCameraOff) {
-      showNotification('Turn on camera first');
       return;
     }
 

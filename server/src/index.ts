@@ -64,10 +64,18 @@ app.get('/ice', (req, res) => {
     { urls: 'stun:stun1.l.google.com:19302' },
   ];
 
-  const turnUrl  = process.env.TURN_URL;
+  let turnUrl  = process.env.TURN_URL?.trim().replace(/^[`'"]|[`'"]$/g, '');
   const turnUser = process.env.TURN_USERNAME;
   const turnCred = process.env.TURN_CREDENTIAL;
+
   if (turnUrl && turnUser && turnCred) {
+    // Fix common mistake: using https:// or http:// for a TURN server URL
+    if (turnUrl.startsWith('http')) {
+      const urlObj = new URL(turnUrl);
+      const hostPort = urlObj.host; // includes port if present
+      turnUrl = `turn:${hostPort}`;
+      logger.info(LogChannel.SERVER, 'Sanitized TURN_URL from HTTP to TURN protocol', { original: process.env.TURN_URL, sanitized: turnUrl });
+    }
     // We no longer hardcode ports 80 and 443, to support custom Docker ports
     servers.push({ urls: turnUrl, username: turnUser, credential: turnCred });
     servers.push({ urls: `${turnUrl}?transport=tcp`, username: turnUser, credential: turnCred });

@@ -310,24 +310,33 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
       return;
     }
 
-    const state = STATE.peer.signalingState;
     try {
       if (sdp.type === 'offer') {
-        if (state !== 'stable') {
-          STATE.pendingSdp = sdp;
-          return;
+        const offerCollision = STATE.peer.signalingState !== 'stable' || STATE.isNegotiating;
+        const polite = STATE.type === 'p2';
+
+        if (offerCollision) {
+          if (!polite) {
+            log('SDP', 'Glare detected: ignoring offer (impolite)');
+            return;
+          }
+          log('SDP', 'Glare detected: rolling back (polite)');
+          await Promise.all([
+            STATE.peer.setLocalDescription({ type: 'rollback' }),
+            STATE.peer.setRemoteDescription(new RTCSessionDescription(sdp))
+          ]);
+        } else {
+          await STATE.peer.setRemoteDescription(new RTCSessionDescription(sdp));
         }
-        await STATE.peer.setRemoteDescription(new RTCSessionDescription(sdp));
+
         const answer = await STATE.peer.createAnswer();
         await STATE.peer.setLocalDescription(answer);
         log('SDP', 'Sending answer', STATE.peer.localDescription.type);
         try { STATE.socket.emit('sdp:send', { sdp: STATE.peer.localDescription }); } catch (e) {}
         log('SDP', 'Answer sent');
       } else if (sdp.type === 'answer') {
-        // M-05: Only accept answer when we have a pending local offer
-        if (state !== 'have-local-offer') {
-          log('SDP', 'Ignoring answer in state: ' + state);
-          STATE.pendingSdp = sdp;
+        if (STATE.peer.signalingState !== 'have-local-offer') {
+          log('SDP', 'Ignoring answer in state: ' + STATE.peer.signalingState);
           return;
         }
         await STATE.peer.setRemoteDescription(new RTCSessionDescription(sdp));
@@ -335,9 +344,6 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
       STATE.isNegotiating = false;
     } catch (err) {
       log('ERROR', 'handleSdp failed', err);
-      if (err?.name === 'InvalidStateError') {
-        STATE.pendingSdp = sdp;
-      }
     }
   }
 
@@ -355,15 +361,8 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
 
     if (STATE.pendingSdp) {
       const s = STATE.pendingSdp;
-      const st = STATE.peer.signalingState;
-      if (s.type === 'offer' && st === 'stable') {
-        STATE.pendingSdp = null;
-        handleSdp(s);
-      } else if (s.type === 'answer' && st === 'have-local-offer') {
-        // M-05: Only process pending answer in have-local-offer state
-        STATE.pendingSdp = null;
-        handleSdp(s);
-      }
+      STATE.pendingSdp = null;
+      await handleSdp(s);
     }
   }
 

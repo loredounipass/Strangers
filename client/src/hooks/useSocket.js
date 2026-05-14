@@ -4,7 +4,7 @@ import { AppState } from './useAppState.js';
 import { getClientId } from './useWebRTC.js';
 
 // C-03: URL from environment variable instead of hardcoded
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:8000';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://fantastic-broccoli-5j4gqrq4rprhvq5-8000.app.github.dev';
 
 const RECONNECT_CONFIG = {
   maxAttempts: 3,
@@ -265,7 +265,7 @@ export function useSocket({
       webrtc.fullCleanup();
     });
 
-    STATE.socket.on('sdp:reply', ({ sdp, from }) => {
+    STATE.socket.on('sdp:reply', async ({ sdp, from }) => {
       if (!from || !isValidRoomForSocket(STATE, STATE.roomid)) {
         console.warn('[SDP] Invalid room for SDP reply');
         return;
@@ -276,11 +276,11 @@ export function useSocket({
         STATE.pendingSdp = sdp;
         return;
       }
-      webrtc.handleSdp(sdp);
-      webrtc.processPendingMessages();
+      await webrtc.handleSdp(sdp);
+      await webrtc.processPendingMessages();
     });
 
-    STATE.socket.on('ice:reply', ({ candidate, from }) => {
+    STATE.socket.on('ice:reply', async ({ candidate, from }) => {
       if (!from) return;
       
       if (!isValidRoomForSocket(STATE, STATE.roomid)) {
@@ -288,7 +288,7 @@ export function useSocket({
         return;
       }
       
-      webrtc.handleIce(candidate);
+      await webrtc.handleIce(candidate);
     });
 
     STATE.socket.on('get-message', (message) => {

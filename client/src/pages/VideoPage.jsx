@@ -27,7 +27,8 @@ export default function VideoPage() {
 
   // ---- UI STATE ----
   const [spinnerVisible, setSpinnerVisible] = useState(true);
-  const [muteBtnText,    setMuteBtnText]    = useState('MUTED');
+  // El audio inicia habilitado, por lo que el botón debe mostrar 'MUTE' para ofrecer la acción de silenciar
+  const [muteBtnText,    setMuteBtnText]    = useState('MUTE');
   const [cameraBtnText,  setCameraBtnText]  = useState('OFF');
   const [activeVideo, setActiveVideo] = useState('stranger'); // 'stranger' | 'self'
 
