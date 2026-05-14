@@ -91,10 +91,6 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
         try {
           STATE.isNegotiating = false;
           STATE.peer.restartIce();
-          // Solo p1 renegocia con offer tras ICE restart
-          if (STATE.type === 'p1') {
-            createOffer(true);
-          }
           return; // no mostrar error aún, esperar resultado del restart
         } catch (e) {
           log('ICE', 'ICE restart failed', e);
@@ -115,10 +111,8 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
   // ----------------------------------------
   function attemptPlay() {
     const video = strangerVideoRef?.current;
-    // M-04/H-03: Don't permanently mute the video — we just need autoplay to work
-    // The video element starts muted in JSX; we unmute after first successful play
-    if (!video.srcObject) return;
-    video.muted = true; // needed for autoplay policy
+    if (!video || !video.srcObject) return;
+    
     if (STATE.videoPlayRetries >= 5) {
       log('VIDEO', 'Max retries reached');
       return;
@@ -127,9 +121,18 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
     STATE.videoPlayRetries++;
     const delay = Math.min(1000 * Math.pow(2, STATE.videoPlayRetries), 5000);
 
-    video.play().catch(() => {
-      log('VIDEO', `Retry ${STATE.videoPlayRetries} in ${delay}ms`);
-      timers.setTimer('videoRetry', attemptPlay, delay);
+    // Intentamos reproducir normalmente (con audio)
+    video.play().catch((err) => {
+      if (err.name === 'NotAllowedError') {
+        log('VIDEO', 'Autoplay blocked by browser. Muting to bypass policy...');
+        video.muted = true;
+        video.play().catch(() => {
+          timers.setTimer('videoRetry', attemptPlay, delay);
+        });
+      } else {
+        log('VIDEO', `Retry ${STATE.videoPlayRetries} in ${delay}ms`, err);
+        timers.setTimer('videoRetry', attemptPlay, delay);
+      }
     });
   }
 
@@ -160,10 +163,11 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
       if (sender.track.kind === 'video') {
         params.encodings[0] = {
           ...params.encodings[0],
-          maxBitrate: 4000000,
-          minBitrate: 1000000,
-          scalabilityMode: 'L1T3',
+          // Límite máximo seguro para P2P (2.5 Mbps). Dejamos que WebRTC (BWE) lo gestione hacia abajo.
+          maxBitrate: 2500000, 
           networkPriority: 'high',
+          // 'maintain-framerate' le dice al navegador que baje la resolución (pixelación)
+          // antes que sacrificar los FPS, asegurando que el video no se vea "super lento".
           degradationPreference: 'maintain-framerate',
         };
       } else if (sender.track.kind === 'audio') {
@@ -175,31 +179,6 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
       }
       sender.setParameters(params).catch(() => {});
     });
-  }
-
-  function adaptBitrate(bitrate, rtt) {
-    if (!STATE.peer) return;
-
-    let newLevel = 'high';
-    if (rtt > 400 || bitrate < 300000) newLevel = 'low';
-    else if (rtt > 200 || bitrate < 800000) newLevel = 'medium';
-
-    if (newLevel !== STATE.currentQualityLevel) {
-      const preset = CONFIG.QUALITY[newLevel];
-      STATE.currentQualityLevel = newLevel;
-
-      STATE.peer.getSenders().forEach((sender) => {
-        if (sender.track?.kind === 'video') {
-          const params = sender.getParameters();
-          if (params.encodings?.[0]) {
-            params.encodings[0].maxBitrate = preset.maxBitrate;
-            params.encodings[0].minBitrate = preset.minBitrate;
-            sender.setParameters(params).catch(() => {});
-          }
-        }
-      });
-      log('QUALITY', `Changed to ${newLevel}`, { rtt, bitrate });
-    }
   }
 
   function startStatsMonitoring() {
@@ -225,16 +204,6 @@ export function useWebRTC(STATE, setAppState, canPerformAction, showNotification
         if (!videoInbound) return;
 
         const now = Date.now();
-        if (lastTimeRef.current > 0) {
-          const timeDiff = (now - lastTimeRef.current) / 1000;
-          const bytesDiff = (videoInbound.bytesReceived || 0) - lastBytesRef.current;
-          const bitrate = timeDiff > 0 ? Math.round((bytesDiff * 8) / timeDiff) : 0;
-          const rtt = candidatePair?.currentRoundTripTime
-            ? candidatePair.currentRoundTripTime * 1000
-            : 0;
-          adaptBitrate(bitrate, rtt);
-        }
-
         lastBytesRef.current = videoInbound.bytesReceived || 0;
         lastTimeRef.current = now;
       } catch (e) {

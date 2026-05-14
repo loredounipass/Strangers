@@ -14,15 +14,14 @@ import {
 export function useMedia(STATE, showNotification) {
   const initMedia = useCallback(async (myVideoEl) => {
     try {
-      // Por defecto iniciamos con la cámara apagada, pero asegurándonos de que
-      // el estado global también refleje que NO estamos muteados inicialmente
+      // Por defecto iniciamos con la cámara apagada y el micrófono APAGADO (Muteado)
       STATE.isCameraOff = true;
-      STATE.isMuted = false;
+      STATE.isMuted = true;
 
       STATE.localStream = await getAudioOnlyStream();
-      // Aseguramos de que los tracks de audio estén habilitados desde el principio
+      // Aseguramos de que los tracks de audio estén deshabilitados desde el principio
       const { audio } = getStreamTracks(STATE.localStream);
-      audio.forEach(track => track.enabled = true);
+      audio.forEach(track => track.enabled = false);
 
       if (myVideoEl) {
         myVideoEl.srcObject = STATE.localStream;
@@ -47,33 +46,32 @@ export function useMedia(STATE, showNotification) {
 
     const { video } = getStreamTracks(STATE.localStream);
 
-    // Si no hay tracks de video aún → solicitar cámara
-    if (video.length === 0 && STATE.isCameraOff) {
-      showNotification('Requesting camera...');
-      try {
-        const newStream = await getMediaStreamWithFallback((err) => {
-          console.warn('[MEDIA] Fallback camera init', err?.name);
-        });
+      // Si no hay tracks de video aún → solicitar cámara
+      if (video.length === 0 && STATE.isCameraOff) {
+        showNotification('Requesting camera...');
+        try {
+          // Importante: pasamos `false` como segundo parámetro para NO pedir audio.
+          // Si pedimos audio de nuevo, se interrumpe el micrófono actual y causa un eco/feedback loop ("pim pim pim").
+          const newStream = await getMediaStreamWithFallback((err) => {
+            console.warn('[MEDIA] Fallback camera init', err?.name);
+          }, false);
 
-        const newVideo = newStream.getVideoTracks();
-        if (!newVideo || newVideo.length === 0) {
-          showNotification('No camera found');
-          newStream.getTracks().forEach((t) => t.stop());
-          return;
-        }
+          const newVideo = newStream.getVideoTracks();
+          if (!newVideo || newVideo.length === 0) {
+            showNotification('No camera found');
+            newStream.getTracks().forEach((t) => t.stop());
+            return;
+          }
 
-        newVideo.forEach((track) => {
-          try { STATE.localStream.addTrack(track); } catch (e) {}
-          try {
-            if (STATE.peer) STATE.peer.addTrack(track, STATE.localStream);
-          } catch (e) {}
-        });
+          newVideo.forEach((track) => {
+            try { STATE.localStream.addTrack(track); } catch (e) {}
+            try {
+              if (STATE.peer) STATE.peer.addTrack(track, STATE.localStream);
+            } catch (e) {}
+          });
 
-        // Detener audio tracks del helper stream (evitar duplicados)
-        newStream.getAudioTracks().forEach((t) => t.stop());
-
-        STATE.isCameraOff = false;
-        setCameraBtnText('ON');
+          STATE.isCameraOff = false;
+          setCameraBtnText('ON');
         if (myVideoEl) myVideoEl.srcObject = STATE.localStream;
         showNotification('Video ON');
 

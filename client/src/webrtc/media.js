@@ -9,7 +9,7 @@ export async function getNativeVideoConstraints() {
       return {
         width: { ideal: 1280, min: 640 },
         height: { ideal: 720, min: 480 },
-        frameRate: { ideal: 30, min: 24 },
+        frameRate: { ideal: 30, min: 15 },
         facingMode: "user"
       };
     }
@@ -17,12 +17,13 @@ export async function getNativeVideoConstraints() {
     const deviceId = videoDevices[0].deviceId;
     const capabilities = navigator.mediaDevices.getSupportedConstraints();
     
-    // Start with more conservative constraints
+    // Quitamos los límites "max" estrictos y relajamos el "min" de framerate a 15
+    // para que WebRTC prefiera bajar la resolución antes que bajar los FPS
     const constraints = {
       deviceId: deviceId ? { exact: deviceId } : undefined,
-      width: { ideal: 1280, max: 1280, min: 640 },
-      height: { ideal: 720, max: 720, min: 480 },
-      frameRate: { ideal: 30, min: 24 },
+      width: { ideal: 1280, min: 640 },
+      height: { ideal: 720, min: 480 },
+      frameRate: { ideal: 30, min: 15 },
       facingMode: "user"
     };
     
@@ -41,7 +42,7 @@ export function getFallbackVideoConstraints() {
   return {
     width: { ideal: 1280, min: 640 },
     height: { ideal: 720, min: 480 },
-    frameRate: { ideal: 30, min: 24 },
+    frameRate: { ideal: 30, min: 15 },
     facingMode: "user"
   };
 }
@@ -55,25 +56,32 @@ export function getMinimalVideoConstraints() {
   };
 }
 
-export async function getMediaStream(videoConstraints, audioConstraints = {}) {
+export async function getMediaStream(videoConstraints, audioConstraints = null) {
+  if (audioConstraints === false || audioConstraints === null) {
+    return navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: videoConstraints
+    });
+  }
+
   const defaultAudio = {
-    echoCancellation: { ideal: true },
-    noiseSuppression: { ideal: true },
-    autoGainControl: { ideal: true }
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
   };
   
   return navigator.mediaDevices.getUserMedia({
-    audio: { ...defaultAudio, ...audioConstraints },
+    audio: typeof audioConstraints === 'object' ? { ...defaultAudio, ...audioConstraints } : defaultAudio,
     video: videoConstraints
   });
 }
 
-export async function getMediaStreamWithFallback(onFallback) {
+export async function getMediaStreamWithFallback(onFallback, requestAudio = false) {
   // Try with high quality first
   const highConstraints = await getNativeVideoConstraints();
   
   try {
-    return await getMediaStream(highConstraints);
+    return await getMediaStream(highConstraints, requestAudio);
   } catch (err) {
     console.warn('[MEDIA] High quality failed, trying fallback:', err.name);
     
@@ -81,7 +89,7 @@ export async function getMediaStreamWithFallback(onFallback) {
     const fallbackConstraints = getFallbackVideoConstraints();
     
     try {
-      return await getMediaStream(fallbackConstraints);
+      return await getMediaStream(fallbackConstraints, requestAudio);
     } catch (fallbackErr) {
       console.warn('[MEDIA] Fallback failed, trying minimal:', fallbackErr.name);
       
@@ -89,18 +97,22 @@ export async function getMediaStreamWithFallback(onFallback) {
       const minimalConstraints = getMinimalVideoConstraints();
       
       try {
-        return await getMediaStream(minimalConstraints);
+        return await getMediaStream(minimalConstraints, requestAudio);
       } catch (minimalErr) {
         console.error('[MEDIA] All video constraints failed:', minimalErr.name);
         
-        // Try audio only
+        // Try audio only if requested
         if (onFallback) onFallback(minimalErr);
         
-        try {
-          return await getAudioOnlyStream();
-        } catch (audioErr) {
-          console.error('[MEDIA] Even audio failed:', audioErr.name);
-          throw audioErr;
+        if (requestAudio) {
+          try {
+            return await getAudioOnlyStream();
+          } catch (audioErr) {
+            console.error('[MEDIA] Even audio failed:', audioErr.name);
+            throw audioErr;
+          }
+        } else {
+          throw minimalErr;
         }
       }
     }
@@ -110,9 +122,9 @@ export async function getMediaStreamWithFallback(onFallback) {
 export async function getAudioOnlyStream() {
   return navigator.mediaDevices.getUserMedia({
     audio: {
-      echoCancellation: { ideal: true },
-      noiseSuppression: { ideal: true },
-      autoGainControl: { ideal: true }
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
     },
     video: false
   });

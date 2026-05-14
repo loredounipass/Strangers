@@ -234,9 +234,7 @@ export function useSocket({
       if (!video) return;
 
       if (cameraOff) {
-        try {
-          video.pause();
-        } catch (e) {}
+        // NO HACER video.pause() porque eso también pausa el audio que viene en el mismo stream!
         video.style.opacity = '0.3';
         video.dataset.cameraOff = '1';
       } else {
