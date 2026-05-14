@@ -1,4 +1,5 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
+import EmojiPicker from 'emoji-picker-react';
 
 /**
  * ChatHolder — Panel de mensajes + input + typing indicator.
@@ -13,6 +14,7 @@ export default function ChatHolder({
   onInput,
 }) {
   const messagesEndRef = useRef(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -25,6 +27,21 @@ export default function ChatHolder({
       e.preventDefault();
       onSend();
     }
+  }
+
+  function handleEmojiClick(emojiObject) {
+    const input = inputRef.current;
+    if (input) {
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
+      const currentValue = input.value;
+      const newValue = currentValue.substring(0, start) + emojiObject.emoji + currentValue.substring(end);
+      input.value = newValue;
+      input.focus();
+      input.setSelectionRange(start + emojiObject.emoji.length, start + emojiObject.emoji.length);
+      onInput && onInput(newValue);
+    }
+    setShowEmojiPicker(false);
   }
 
   return (
@@ -55,6 +72,13 @@ export default function ChatHolder({
 
       <div className="input">
         <div className="input-container">
+          <button 
+            className="emoji-btn" 
+            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+            title="Add emoji"
+          >
+            😊
+          </button>
           <input
             type="text"
             placeholder="Message..."
@@ -67,6 +91,11 @@ export default function ChatHolder({
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
         </div>
+        {showEmojiPicker && (
+          <div className="emoji-picker-wrapper">
+            <EmojiPicker onEmojiClick={handleEmojiClick} />
+          </div>
+        )}
       </div>
     </div>
   );
