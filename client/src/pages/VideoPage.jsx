@@ -33,7 +33,7 @@ export default function VideoPage() {
   const [muteBtnText,    setMuteBtnText]    = useState('MUTED');
   const [cameraBtnText,  setCameraBtnText]  = useState('OFF');
   const [activeVideo, setActiveVideo] = useState('stranger'); // 'stranger' | 'self'
-  const [filterActive, setFilterActive] = useState(false);
+  const [filterBarVisible, setFilterBarVisible] = useState(false);
   const [activeFilter, setActiveFilter] = useState('none');
 
   // ---- HOOKS ----
@@ -79,12 +79,16 @@ export default function VideoPage() {
   // ---- SIDE EFFECTS ----
   // Si se apaga la cámara, también se desactivan los filtros
   useEffect(() => {
-    if (cameraBtnText === 'OFF' && filterActive) {
-      destroyInstacam();
-      setFilterActive(false);
-      setActiveFilter('none');
+    if (cameraBtnText === 'OFF') {
+      if (activeFilter !== 'none') {
+        destroyInstacam();
+        setActiveFilter('none');
+      }
+      if (filterBarVisible) {
+        setFilterBarVisible(false);
+      }
     }
-  }, [cameraBtnText, filterActive, destroyInstacam]);
+  }, [cameraBtnText, activeFilter, filterBarVisible, destroyInstacam]);
 
   // ---- INIT ----
   useEffect(() => {
@@ -121,7 +125,7 @@ export default function VideoPage() {
 
     // 2. Limpiar localmente (lightCleanup ya apaga cámara y detiene video tracks)
     destroyInstacam();
-    setFilterActive(false);
+    setFilterBarVisible(false);
     setActiveFilter('none');
     clearMessages();
     webrtc.lightCleanup();
@@ -132,7 +136,17 @@ export default function VideoPage() {
     STATE.isMuted = true;
     setCameraBtnText('OFF');
     setMuteBtnText('MUTED');
+
+    // M-04: Limpiar el frame congelado del video local.
+    // Al detener los tracks en lightCleanup(), el elemento <video> se queda congelado en el último frame.
+    // Reasignar el srcObject fuerza al navegador a dibujar un cuadro negro (ya que no hay tracks de video).
+    if (myVideoRef.current) {
+      myVideoRef.current.srcObject = null;
+      myVideoRef.current.srcObject = STATE.localStream;
+    }
+
     setSpinnerVisible(true);
+    setActiveVideo('stranger'); // <--- Resetear vista principal al stranger
     setAppState(AppState.CONNECTING);
   }, [STATE, webrtc, clearMessages, destroyInstacam, setAppState]);
 
@@ -203,60 +217,70 @@ export default function VideoPage() {
     setActiveVideo(video);
   }, []);
 
-  const handleToggleFilter = useCallback(async () => {
-    console.log('[FILTER] handleToggleFilter', { filterActive, cameraOff: STATE.isCameraOff });
-    if (filterActive) {
-      console.log('[FILTER] deactivating filters');
-      destroyInstacam();
-      setActiveFilter('none');
-      setFilterActive(false);
+  const handleToggleFilter = useCallback(() => {
+    // No permitir filtros si la cámara está apagada
+    if (STATE.isCameraOff) return;
+    setFilterBarVisible(prev => !prev);
+  }, [STATE.isCameraOff]);
 
+  const handleSelectFilter = useCallback(async (filterKey) => {
+    setActiveFilter(filterKey);
+
+    if (filterKey === 'none') {
+      // === DESACTIVAR FILTROS ===
+      destroyInstacam();
+
+      // Restaurar el track de video original en la conexión WebRTC
       const videoSender = STATE.peer?.getSenders().find(s => s.track?.kind === 'video');
       const originalTrack = STATE.localStream?.getVideoTracks()[0];
-      console.log('[FILTER] restoring track', { hasSender: !!videoSender, hasOriginalTrack: !!originalTrack });
       if (videoSender && originalTrack) {
         try {
           await videoSender.replaceTrack(originalTrack);
-          console.log('[FILTER] restored original video track');
         } catch (e) {
-          console.error('[FILTER] restore track error:', e);
+          console.error('[INSTACAM] Error restoring original track:', e);
         }
       }
-    } else {
-      console.log('[FILTER] activating filters');
-      setFilterActive(true);
-      const canvasStream = initInstacam();
-      console.log('[FILTER] canvasStream result', { hasStream: !!canvasStream });
-      if (!canvasStream) {
-        console.log('[FILTER] no canvas stream, disabling filter');
-        setFilterActive(false);
-        return;
+
+      // Restaurar el stream original en el video local
+      if (myVideoRef.current) {
+        myVideoRef.current.srcObject = STATE.localStream;
       }
+
+    } else {
+      // === ACTIVAR O CAMBIAR FILTRO ===
+      applyFilter(filterKey);
+
+      const canvasStream = initInstacam();
+      if (!canvasStream) return;
 
       const newTrack = canvasStream.getVideoTracks()[0];
       if (!newTrack) {
-        console.log('[FILTER] no video track in canvas stream');
-        setFilterActive(false);
+        destroyInstacam();
         return;
       }
 
+      // Reemplazar el stream en el video local para ver los pixel filters
+      if (myVideoRef.current && myVideoRef.current.srcObject !== canvasStream) {
+        myVideoRef.current.srcObject = canvasStream;
+      }
+
+      // Reemplazar el track de video en la conexión WebRTC con el del canvas filtrado
       const videoSender = STATE.peer?.getSenders().find(s => s.track?.kind === 'video');
-      console.log('[FILTER] replacing track', { hasSender: !!videoSender });
-      if (videoSender) {
+      if (videoSender && videoSender.track !== newTrack) {
         try {
           await videoSender.replaceTrack(newTrack);
-          console.log('[FILTER] replaced video track with canvas stream');
         } catch (e) {
-          console.error('[FILTER] replace track error:', e);
+          console.error('[INSTACAM] Error replacing track:', e);
+          // Rollback en caso de fallo
+          destroyInstacam();
+          setActiveFilter('none');
+          if (myVideoRef.current) {
+            myVideoRef.current.srcObject = STATE.localStream;
+          }
         }
       }
     }
-  }, [filterActive, initInstacam, destroyInstacam, STATE]);
-
-  const handleSelectFilter = useCallback((filterKey) => {
-    setActiveFilter(filterKey);
-    applyFilter(filterKey);
-  }, [applyFilter]);
+  }, [initInstacam, destroyInstacam, applyFilter, STATE]);
 
   // ---- RENDER ----
   return (
@@ -283,7 +307,7 @@ export default function VideoPage() {
           cameraBtnText={cameraBtnText}
           activeVideo={activeVideo}
           onVideoClick={handleVideoClick}
-          filterActive={filterActive}
+          filterBarVisible={filterBarVisible}
           activeFilter={activeFilter}
           onSelectFilter={handleSelectFilter}
           onToggleFilter={handleToggleFilter}

@@ -3,6 +3,8 @@ import WaitingModal from './WaitingModal.jsx';
 import Controls from './Controls.jsx';
 import FilterBar from './FilterBar.jsx';
 
+import { FILTERS } from '../../hooks/useInstacam.js';
+
 const VideoHolder = forwardRef(function VideoHolder(
   {
     spinnerVisible,
@@ -15,7 +17,7 @@ const VideoHolder = forwardRef(function VideoHolder(
     cameraBtnText,
     activeVideo = 'stranger',
     onVideoClick,
-    filterActive,
+    filterBarVisible,
     activeFilter,
     onSelectFilter,
     onToggleFilter,
@@ -72,14 +74,13 @@ const VideoHolder = forwardRef(function VideoHolder(
           ref={myVideoRef}
           className={getSelfClasses()}
           onClick={handleSelfClick}
-          style={{ display: filterActive ? 'none' : '' }}
         />
       </div>
 
       <FilterBar
         activeFilter={activeFilter}
         onSelectFilter={onSelectFilter}
-        visible={filterActive}
+        visible={filterBarVisible}
       />
 
       <Controls
@@ -90,7 +91,7 @@ const VideoHolder = forwardRef(function VideoHolder(
         muteBtnText={muteBtnText}
         cameraBtnText={cameraBtnText}
         onToggleFilter={onToggleFilter}
-        filterActive={filterActive}
+        filterActive={activeFilter !== 'none'}
       />
 
       <WaitingModal visible={spinnerVisible} appState={appState} />

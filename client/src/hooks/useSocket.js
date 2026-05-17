@@ -4,7 +4,7 @@ import { AppState } from './useAppState.js';
 import { getClientId } from './useWebRTC.js';
 
 // C-03: URL from environment variable instead of hardcoded
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://shiny-waffle-rqr4g6grxq9fpwj4-8000.app.github.dev';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://opulent-space-winner-p4gjrwrg95pc9j5-8000.app.github.dev';
 
 const RECONNECT_CONFIG = {
   maxAttempts: 3,

@@ -3,7 +3,12 @@ import { FILTERS } from '../../hooks/useInstacam.js';
 export default function FilterBar({ activeFilter, onSelectFilter, visible }) {
   if (!visible) return null;
 
-  const entries = Object.entries(FILTERS);
+  // Excluir 'none' — el usuario desactiva filtros con el botón toggle, no desde aquí
+  const entries = Object.entries(FILTERS).filter(([key]) => key !== 'none');
+
+  // Separar CSS y pixel filters para mejor organización visual
+  const cssFilters = entries.filter(([, f]) => f.type === 'css');
+  const pixelFilters = entries.filter(([, f]) => f.type === 'pixel');
 
   return (
     <div className="filter-bar-wrap">
@@ -21,13 +26,30 @@ export default function FilterBar({ activeFilter, onSelectFilter, visible }) {
       </button>
 
       <div className="filter-bar">
-        {entries.map(([key, filter]) => (
+        {cssFilters.map(([key, filter]) => (
           <button
             key={key}
-            className={`filter-btn ${activeFilter === key ? 'active' : ''}`}
+            className={`ig-filter-item ${activeFilter === key ? 'active' : ''}`}
             onClick={() => onSelectFilter(key)}
           >
-            {filter.label}
+            <div 
+              className="ig-filter-circle" 
+              style={{ filter: filter.type === 'css' ? filter.css : 'none' }}
+            >
+              {/* The background image is set via CSS, but the filter applies to it! */}
+            </div>
+            <span className="ig-filter-label">{filter.label}</span>
+          </button>
+        ))}
+
+        {pixelFilters.map(([key, filter]) => (
+          <button
+            key={key}
+            className={`ig-filter-item ${activeFilter === key ? 'active' : ''}`}
+            onClick={() => onSelectFilter(key)}
+          >
+            <div className="ig-filter-circle pixel-style"></div>
+            <span className="ig-filter-label">{filter.label}</span>
           </button>
         ))}
       </div>
