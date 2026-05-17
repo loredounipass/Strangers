@@ -76,6 +76,16 @@ export default function VideoPage() {
     setCameraBtnText,
   });
 
+  // ---- SIDE EFFECTS ----
+  // Si se apaga la cámara, también se desactivan los filtros
+  useEffect(() => {
+    if (cameraBtnText === 'OFF' && filterActive) {
+      destroyInstacam();
+      setFilterActive(false);
+      setActiveFilter('none');
+    }
+  }, [cameraBtnText, filterActive, destroyInstacam]);
+
   // ---- INIT ----
   useEffect(() => {
     let mounted = true;
@@ -194,14 +204,16 @@ export default function VideoPage() {
   }, []);
 
   const handleToggleFilter = useCallback(async () => {
-    console.log('[FILTER] handleToggleFilter', { filterActive });
+    console.log('[FILTER] handleToggleFilter', { filterActive, cameraOff: STATE.isCameraOff });
     if (filterActive) {
+      console.log('[FILTER] deactivating filters');
       destroyInstacam();
       setActiveFilter('none');
       setFilterActive(false);
 
       const videoSender = STATE.peer?.getSenders().find(s => s.track?.kind === 'video');
       const originalTrack = STATE.localStream?.getVideoTracks()[0];
+      console.log('[FILTER] restoring track', { hasSender: !!videoSender, hasOriginalTrack: !!originalTrack });
       if (videoSender && originalTrack) {
         try {
           await videoSender.replaceTrack(originalTrack);
@@ -211,8 +223,10 @@ export default function VideoPage() {
         }
       }
     } else {
+      console.log('[FILTER] activating filters');
       setFilterActive(true);
       const canvasStream = initInstacam();
+      console.log('[FILTER] canvasStream result', { hasStream: !!canvasStream });
       if (!canvasStream) {
         console.log('[FILTER] no canvas stream, disabling filter');
         setFilterActive(false);
@@ -227,6 +241,7 @@ export default function VideoPage() {
       }
 
       const videoSender = STATE.peer?.getSenders().find(s => s.track?.kind === 'video');
+      console.log('[FILTER] replacing track', { hasSender: !!videoSender });
       if (videoSender) {
         try {
           await videoSender.replaceTrack(newTrack);

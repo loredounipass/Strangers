@@ -1352,12 +1352,12 @@
   /* Filter bar */
   .filter-bar-wrap {
     position: absolute;
-    bottom: 72px;
+    bottom: 90px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     z-index: 200;
     user-select: none;
     -webkit-user-select: none;
@@ -1378,7 +1378,7 @@
     -ms-overflow-style: none;
     -webkit-overflow-scrolling: touch;
     scroll-behavior: smooth;
-    max-width: calc(100vw - 80px);
+    max-width: min(400px, calc(100vw - 120px));
   }
 
   .filter-bar::-webkit-scrollbar {
@@ -1413,7 +1413,7 @@
     transform: scale(0.88);
   }
 
-  .filter-arrow.hidden {
+  .filter-arrow.is-hidden {
     opacity: 0;
     pointer-events: none;
   }
@@ -2319,7 +2319,7 @@
     }
 
     .filter-bar-wrap {
-      bottom: 66px;
+      bottom: 100px;
     }
 
     .filter-bar {
@@ -2365,29 +2365,29 @@
     }
 
     .filter-bar-wrap {
-      bottom: 63px;
+      bottom: 110px;
       gap: 4px;
     }
 
     .filter-bar {
-      padding: 3px 4px;
-      gap: 2px;
-      max-width: calc(100vw - 56px);
+      padding: 6px 8px;
+      gap: 4px;
+      max-width: calc(100vw - 100px);
     }
 
     .filter-btn {
-      padding: 3px 7px;
-      font-size: 9px;
+      padding: 5px 10px;
+      font-size: 11px;
     }
 
     .filter-arrow {
-      width: 18px;
-      height: 18px;
+      width: 22px;
+      height: 22px;
     }
 
     .filter-arrow svg {
-      width: 11px;
-      height: 11px;
+      width: 13px;
+      height: 13px;
     }
   }
 

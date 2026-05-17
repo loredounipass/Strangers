@@ -1,31 +1,6 @@
-import { useRef, useState, useEffect } from 'react';
 import { FILTERS } from '../../hooks/useInstacam.js';
 
 export default function FilterBar({ activeFilter, onSelectFilter, visible }) {
-  const scrollRef = useRef(null);
-  const [showLeft, setShowLeft] = useState(false);
-  const [showRight, setShowRight] = useState(false);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-
-    const update = () => {
-      setShowLeft(el.scrollLeft > 4);
-      setShowRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 4);
-    };
-
-    update();
-    el.addEventListener('scroll', update, { passive: true });
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-
-    return () => {
-      el.removeEventListener('scroll', update);
-      ro.disconnect();
-    };
-  }, []);
-
   if (!visible) return null;
 
   const entries = Object.entries(FILTERS);
@@ -33,8 +8,11 @@ export default function FilterBar({ activeFilter, onSelectFilter, visible }) {
   return (
     <div className="filter-bar-wrap">
       <button
-        className={`filter-arrow ${showLeft ? '' : 'hidden'}`}
-        onClick={() => scrollRef.current?.scrollBy({ left: -120, behavior: 'smooth' })}
+        className="filter-arrow"
+        onClick={(e) => {
+          const el = e.currentTarget.parentElement.querySelector('.filter-bar');
+          el?.scrollBy({ left: -120, behavior: 'smooth' });
+        }}
         aria-label="Scroll left"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -42,7 +20,7 @@ export default function FilterBar({ activeFilter, onSelectFilter, visible }) {
         </svg>
       </button>
 
-      <div className="filter-bar" ref={scrollRef}>
+      <div className="filter-bar">
         {entries.map(([key, filter]) => (
           <button
             key={key}
@@ -55,8 +33,11 @@ export default function FilterBar({ activeFilter, onSelectFilter, visible }) {
       </div>
 
       <button
-        className={`filter-arrow ${showRight ? '' : 'hidden'}`}
-        onClick={() => scrollRef.current?.scrollBy({ left: 120, behavior: 'smooth' })}
+        className="filter-arrow"
+        onClick={(e) => {
+          const el = e.currentTarget.parentElement.querySelector('.filter-bar');
+          el?.scrollBy({ left: 120, behavior: 'smooth' });
+        }}
         aria-label="Scroll right"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

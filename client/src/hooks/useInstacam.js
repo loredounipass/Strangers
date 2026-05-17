@@ -55,7 +55,14 @@ export function useInstacam(containerRef, videoRef) {
       video: !!videoRef?.current,
       alreadyRunning: !!rafRef.current,
     });
-    if (!containerRef?.current || !videoRef?.current || rafRef.current) return null;
+    if (!containerRef?.current || !videoRef?.current || rafRef.current) {
+      console.log('[FILTER] init aborted:', {
+        noContainer: !containerRef?.current,
+        noVideo: !videoRef?.current,
+        alreadyRunning: !!rafRef.current,
+      });
+      return null;
+    }
 
     const container = containerRef.current;
     const video = videoRef.current;
