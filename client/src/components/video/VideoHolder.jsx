@@ -1,6 +1,7 @@
 import { forwardRef } from 'react';
 import WaitingModal from './WaitingModal.jsx';
 import Controls from './Controls.jsx';
+import FilterBar from './FilterBar.jsx';
 
 const VideoHolder = forwardRef(function VideoHolder(
   {
@@ -14,10 +15,14 @@ const VideoHolder = forwardRef(function VideoHolder(
     cameraBtnText,
     activeVideo = 'stranger',
     onVideoClick,
+    filterActive,
+    activeFilter,
+    onSelectFilter,
+    onToggleFilter,
   },
   ref
 ) {
-  const { myVideoRef, strangerVideoRef } = ref || {};
+  const { myVideoRef, strangerVideoRef, videoContainerRef } = ref || {};
 
   const handleStrangerClick = () => {
     if (onVideoClick) onVideoClick('stranger');
@@ -44,7 +49,7 @@ const VideoHolder = forwardRef(function VideoHolder(
 
   return (
     <div className="video-holder">
-      <div className="video-container">
+      <div className="video-container" ref={videoContainerRef}>
         <video
           autoPlay
           playsInline
@@ -67,8 +72,15 @@ const VideoHolder = forwardRef(function VideoHolder(
           ref={myVideoRef}
           className={getSelfClasses()}
           onClick={handleSelfClick}
+          style={{ display: filterActive ? 'none' : '' }}
         />
       </div>
+
+      <FilterBar
+        activeFilter={activeFilter}
+        onSelectFilter={onSelectFilter}
+        visible={filterActive}
+      />
 
       <Controls
         onNext={onNext}
@@ -77,6 +89,8 @@ const VideoHolder = forwardRef(function VideoHolder(
         onCamera={onCamera}
         muteBtnText={muteBtnText}
         cameraBtnText={cameraBtnText}
+        onToggleFilter={onToggleFilter}
+        filterActive={filterActive}
       />
 
       <WaitingModal visible={spinnerVisible} appState={appState} />

@@ -1345,6 +1345,108 @@
     }
   }
 
+  .video-canvas {
+    display: block;
+  }
+
+  /* Filter bar */
+  .filter-bar-wrap {
+    position: absolute;
+    bottom: 72px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    z-index: 200;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .filter-bar {
+    display: flex;
+    gap: 3px;
+    padding: 5px 6px;
+    background: rgba(12, 12, 18, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(79, 172, 254, 0.08);
+    border-radius: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    max-width: calc(100vw - 80px);
+  }
+
+  .filter-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filter-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(12, 12, 18, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+    padding: 0;
+    opacity: 1;
+  }
+
+  .filter-arrow:hover {
+    background: rgba(79, 172, 254, 0.15);
+    color: #ffffff;
+  }
+
+  .filter-arrow:active {
+    transform: scale(0.88);
+  }
+
+  .filter-arrow.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .filter-btn {
+    padding: 4px 10px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 10.5px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.18s ease;
+    flex-shrink: 0;
+    letter-spacing: 0.15px;
+    outline: none;
+  }
+
+  .filter-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .filter-btn.active {
+    background: rgba(79, 172, 254, 0.18);
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(79, 172, 254, 0.08);
+    font-weight: 600;
+  }
+
   @media only screen and (max-width: 600px) {
     #my-video {
       width: 100%;
@@ -1902,7 +2004,6 @@
     right: 45px !important;
     background: transparent !important;
     color: #ffffff !important;
-    font-size: 20px !important;
     width: 35px !important;
     height: 35px !important;
     display: flex !important;
@@ -1915,6 +2016,17 @@
     transition: all 0.3s ease !important;
     flex-shrink: 0 !important;
     box-shadow: none !important;
+  }
+
+  .chat-holder .emoji-btn svg {
+    width: 20px !important;
+    height: 20px !important;
+    opacity: 0.7 !important;
+    transition: opacity 0.3s ease !important;
+  }
+
+  .chat-holder .emoji-btn:hover svg {
+    opacity: 1 !important;
   }
 
   .chat-holder .emoji-btn:hover {
@@ -1955,6 +2067,15 @@
     --emoji-picker-border-color: rgba(79, 172, 254, 0.2) !important;
     --emoji-picker-bg-color: rgba(15, 15, 20, 0.98) !important;
     --emoji-picker-text-color: #ffffff !important;
+    --emoji-picker-category-color: rgba(255, 255, 255, 0.7) !important;
+    --emoji-picker-hover-bg-color: rgba(79, 172, 254, 0.15) !important;
+    --emoji-picker-search-bg-color: rgba(0, 0, 0, 0.3) !important;
+    --emoji-picker-search-border-color: rgba(79, 172, 254, 0.2) !important;
+    --emoji-picker-search-color: #ffffff !important;
+    --emoji-picker-search-placeholder-color: rgba(255, 255, 255, 0.4) !important;
+    --emoji-picker-scrollbar-color: rgba(79, 172, 254, 0.3) !important;
+    --emoji-picker-scrollbar-bg: transparent !important;
+    --emoji-picker-category-icon-color: rgba(255, 255, 255, 0.6) !important;
   }
 
   /* Modal / waiting overlay */
@@ -2196,6 +2317,30 @@
       height: 32px;
       font-size: 13px;
     }
+
+    .filter-bar-wrap {
+      bottom: 66px;
+    }
+
+    .filter-bar {
+      padding: 4px 5px;
+      gap: 2px;
+    }
+
+    .filter-btn {
+      padding: 3px 8px;
+      font-size: 9.5px;
+    }
+
+    .filter-arrow {
+      width: 18px;
+      height: 18px;
+    }
+
+    .filter-arrow svg {
+      width: 11px;
+      height: 11px;
+    }
   }
 
   /* Responsive video page — mobile */
@@ -2210,6 +2355,39 @@
     
     .chat-holder {
       margin-bottom: 0;
+    }
+
+    .emoji-picker-wrapper {
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 65px !important;
+      border-radius: 12px 12px 0 0 !important;
+    }
+
+    .filter-bar-wrap {
+      bottom: 63px;
+      gap: 4px;
+    }
+
+    .filter-bar {
+      padding: 3px 4px;
+      gap: 2px;
+      max-width: calc(100vw - 56px);
+    }
+
+    .filter-btn {
+      padding: 3px 7px;
+      font-size: 9px;
+    }
+
+    .filter-arrow {
+      width: 18px;
+      height: 18px;
+    }
+
+    .filter-arrow svg {
+      width: 11px;
+      height: 11px;
     }
   }
 

@@ -9,6 +9,8 @@ export default function Controls({
   onCamera,
   muteBtnText,
   cameraBtnText,
+  onToggleFilter,
+  filterActive,
 }) {
   const isCameraOff = cameraBtnText !== 'ON';
   const isMuted = muteBtnText !== 'MUTE';
@@ -29,6 +31,14 @@ export default function Controls({
         ) : (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
         )}
+      </button>
+
+      <button
+        className={`cyber-button${filterActive ? '' : ' mute-off'}`}
+        onClick={onToggleFilter}
+        title="Filters"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
       </button>
 
       <button id="exitBtn" className="cyber-button exit" onClick={onExit} title="Exit">

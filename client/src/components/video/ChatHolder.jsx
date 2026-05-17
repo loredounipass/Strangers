@@ -15,12 +15,29 @@ export default function ChatHolder({
 }) {
   const messagesEndRef = useRef(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [pickerWidth, setPickerWidth] = useState(320);
 
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
+
+  useEffect(() => {
+    function updatePickerWidth() {
+      const w = window.innerWidth;
+      if (w < 400) {
+        setPickerWidth(w - 32);
+      } else if (w < 600) {
+        setPickerWidth(350);
+      } else {
+        setPickerWidth(320);
+      }
+    }
+    updatePickerWidth();
+    window.addEventListener('resize', updatePickerWidth);
+    return () => window.removeEventListener('resize', updatePickerWidth);
+  }, []);
 
   function handleKeyDown(e) {
     if (e.key === 'Enter') {
@@ -77,7 +94,12 @@ export default function ChatHolder({
             onClick={() => setShowEmojiPicker(!showEmojiPicker)}
             title="Add emoji"
           >
-            😊
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+              <line x1="9" y1="9" x2="9.01" y2="9"/>
+              <line x1="15" y1="9" x2="15.01" y2="9"/>
+            </svg>
           </button>
           <input
             type="text"
@@ -93,7 +115,15 @@ export default function ChatHolder({
         </div>
         {showEmojiPicker && (
           <div className="emoji-picker-wrapper">
-            <EmojiPicker onEmojiClick={handleEmojiClick} />
+            <EmojiPicker
+              onEmojiClick={handleEmojiClick}
+              theme="dark"
+              skinTonesDisabled
+              lazyLoadEmojis
+              previewConfig={{ showPreview: false }}
+              width={pickerWidth}
+              height={400}
+            />
           </div>
         )}
       </div>
