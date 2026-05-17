@@ -3,12 +3,7 @@ import { FILTERS } from '../../hooks/useInstacam.js';
 export default function FilterBar({ activeFilter, onSelectFilter, visible }) {
   if (!visible) return null;
 
-  // Excluir 'none' — el usuario desactiva filtros con el botón toggle, no desde aquí
-  const entries = Object.entries(FILTERS).filter(([key]) => key !== 'none');
-
-  // Separar CSS y pixel filters para mejor organización visual
-  const cssFilters = entries.filter(([, f]) => f.type === 'css');
-  const pixelFilters = entries.filter(([, f]) => f.type === 'pixel');
+  const entries = Object.entries(FILTERS);
 
   return (
     <div className="filter-bar-wrap">
@@ -26,29 +21,18 @@ export default function FilterBar({ activeFilter, onSelectFilter, visible }) {
       </button>
 
       <div className="filter-bar">
-        {cssFilters.map(([key, filter]) => (
+        {entries.map(([key, filter]) => (
           <button
             key={key}
             className={`ig-filter-item ${activeFilter === key ? 'active' : ''}`}
             onClick={() => onSelectFilter(key)}
           >
             <div 
-              className="ig-filter-circle" 
+              className={`ig-filter-circle ${filter.type === 'pixel' ? 'pixel-style' : ''} ${filter.type === 'ar' ? 'ar-style' : ''}`} 
               style={{ filter: filter.type === 'css' ? filter.css : 'none' }}
             >
-              {/* The background image is set via CSS, but the filter applies to it! */}
+              {/* Para filtros 'none', se verá limpio. Para AR se puede añadir un icono con CSS en ar-style si se desea */}
             </div>
-            <span className="ig-filter-label">{filter.label}</span>
-          </button>
-        ))}
-
-        {pixelFilters.map(([key, filter]) => (
-          <button
-            key={key}
-            className={`ig-filter-item ${activeFilter === key ? 'active' : ''}`}
-            onClick={() => onSelectFilter(key)}
-          >
-            <div className="ig-filter-circle pixel-style"></div>
             <span className="ig-filter-label">{filter.label}</span>
           </button>
         ))}

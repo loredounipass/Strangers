@@ -10,6 +10,7 @@ import { useNotification } from '../components/video/Notification.jsx';
 import Notification from '../components/video/Notification.jsx';
 import VideoHolder from '../components/video/VideoHolder.jsx';
 import ChatHolder from '../components/video/ChatHolder.jsx';
+import AROverlay from '../components/video/AROverlay.jsx';
 import { useInstacam } from '../hooks/useInstacam.js';
 
 /**
@@ -323,6 +324,9 @@ export default function VideoPage() {
       </div>
 
       <Notification notifications={notifications} />
+      
+      {/* Sistema AR Invisible: Mantiene el motor de seguimiento 3D corriendo cuando hay un filtro AR activo */}
+      <AROverlay stream={STATE.localStream} activeFilter={activeFilter} />
     </div>
   );
 }

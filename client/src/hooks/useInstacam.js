@@ -57,6 +57,10 @@ const FILTERS = {
   negative:   { label: 'Negativo',  type: 'pixel', fn: 'negative' },
   posterize:  { label: 'Póster',    type: 'pixel', fn: 'posterize' },
   emboss:     { label: 'Relieve',   type: 'pixel', fn: 'emboss' },
+
+  // ── Filtros AR (MediaPipe + ThreeJS) ──
+  dog:        { label: 'Perrito',   type: 'ar' },
+  anonymous:  { label: 'Anonymous', type: 'ar' },
 };
 
 export { FILTERS };
@@ -263,6 +267,21 @@ export function useInstacam(containerRef, videoRef) {
           // SecurityError si el canvas está tainted — ignorar silenciosamente
         }
       }
+    } else if (filterDef.type === 'ar') {
+      // ── Filtro AR (MediaPipe + Three.js) ──
+      ctx.save();
+      ctx.filter = 'none';
+      ctx.scale(-1, 1);
+      // Dibujar cámara original
+      ctx.drawImage(video, -w, 0, w, h);
+      
+      // Dibujar overlay 3D encima
+      const arContainer = document.getElementById('ar-canvas');
+      const arCanvas = arContainer ? arContainer.querySelector('canvas') : null;
+      if (arCanvas) {
+        ctx.drawImage(arCanvas, -w, 0, w, h);
+      }
+      ctx.restore();
     }
 
     rafRef.current = requestAnimationFrame(drawFrame);
